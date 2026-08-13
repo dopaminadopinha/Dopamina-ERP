@@ -33,9 +33,20 @@ type ProfitabilityImport = { id: string; sale_id: string; period_start: string; 
 type ProfitabilityItem = { id: string; import_id: string; source_product_name: string; source_sku: string | null; source_category: string | null; quantity: number; gross_amount: number; unit_cost: number | null; total_cost: number | null; profit_amount: number; margin_percentage: number; cmv_percentage: number; cost_status: "known" | "missing" };
 type AbcImport = { id: string; file_name: string; total_value: number; row_count: number; missing_cost_count: number; created_at: string };
 type AbcItem = { id: string; import_id: string; source_product_name: string; source_sku: string | null; quantity: number; average_unit_cost: number | null; total_value: number; individual_percentage: number; cumulative_percentage: number; classification: "A" | "B" | "C" };
-type DataState = { sales: Sale[]; saleItems: SaleItem[]; payments: PaymentMethod[]; expenses: Expense[]; imports: ImportRow[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; abcImports: AbcImport[]; abcItems: AbcItem[]; products: number; suppliers: number; areas: Area[] };
+type ZigDashboard = {
+  period_start: string;
+  period_end: string;
+  summary: { gross_cents: number; discount_cents: number; net_cents: number; revenue_cents: number; quantity: number; transaction_count: number; refunded_item_count: number };
+  products: { item_id: string; name: string; sku: string | null; category: string; area: string; quantity: number; gross_cents: number; discount_cents: number; net_cents: number }[];
+  payments: { payment_name: string; value_cents: number }[];
+  daily: { operational_date: string; net_cents: number; transaction_count: number }[];
+  sync: { endpoint: string; status: string; last_success_at: string | null; last_successful_date: string | null; error_message: string | null }[];
+};
+type DateRange = { start: string; end: string };
+type DataState = { sales: Sale[]; saleItems: SaleItem[]; payments: PaymentMethod[]; expenses: Expense[]; imports: ImportRow[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; abcImports: AbcImport[]; abcItems: AbcItem[]; zig: ZigDashboard; products: number; suppliers: number; areas: Area[] };
 
-const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses: [], imports: [], profitabilityImports: [], profitabilityItems: [], abcImports: [], abcItems: [], products: 0, suppliers: 0, areas: [] };
+const EMPTY_ZIG: ZigDashboard = { period_start: "", period_end: "", summary: { gross_cents: 0, discount_cents: 0, net_cents: 0, revenue_cents: 0, quantity: 0, transaction_count: 0, refunded_item_count: 0 }, products: [], payments: [], daily: [], sync: [] };
+const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses: [], imports: [], profitabilityImports: [], profitabilityItems: [], abcImports: [], abcItems: [], zig: EMPTY_ZIG, products: 0, suppliers: 0, areas: [] };
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const NUMBER = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const DATE = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
@@ -54,9 +65,12 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
 function nested<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
 function dateLabel(value: string | null) { return value ? DATE.format(new Date(`${value}T00:00:00Z`)) : "—"; }
 function getBusinessName(membership: Membership | null) { return nested(membership?.businesses)?.name ?? "Dopamina"; }
+function isoInSaoPaulo(date = new Date()) { const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date); const value = Object.fromEntries(parts.map((part) => [part.type, part.value])); return `${value.year}-${value.month}-${value.day}`; }
+function shiftDate(date: string, days: number) { const value = new Date(`${date}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10); }
+function selectedRange(period: string, customStart: string, customEnd: string): DateRange { const today = isoInSaoPaulo(); const [year, month] = today.split("-").map(Number); if (period === "today") return { start: today, end: today }; if (period === "yesterday") { const yesterday = shiftDate(today, -1); return { start: yesterday, end: yesterday }; } if (period === "7d") return { start: shiftDate(today, -6), end: today }; if (period === "last_month") { const start = new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 10); const end = new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10); return { start, end }; } if (period === "custom") return { start: customStart || today, end: customEnd || customStart || today }; return { start: `${year}-${String(month).padStart(2, "0")}-01`, end: today }; }
 
-async function fetchData(businessId: string): Promise<DataState> {
-  const [sales, expenses, products, suppliers, areas, imports, profitabilityImports, abcImports] = await Promise.all([
+async function fetchData(businessId: string, range: DateRange): Promise<DataState> {
+  const [sales, expenses, products, suppliers, areas, imports, profitabilityImports, abcImports, zig] = await Promise.all([
     supabase.from("sales").select("id,import_id,period_start,period_end,business_date,gross_amount,discount_amount,product_gross_amount,service_amount,revenue_amount,closing_net_amount,open_accounts_amount,recharge_balance_amount,sales_imports(file_name,row_count,created_at)").eq("business_id", businessId).order("business_date", { ascending: false }),
     supabase.from("expenses").select("id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
     supabase.from("items").select("id", { count: "exact", head: true }).eq("business_id", businessId).eq("item_type", "product"),
@@ -65,8 +79,9 @@ async function fetchData(businessId: string): Promise<DataState> {
     supabase.from("sales_imports").select("id,file_name,period_start,period_end,row_count,status,created_at").eq("business_id", businessId).order("created_at", { ascending: false }),
     supabase.from("zig_profitability_imports").select("id,sale_id,period_start,period_end,source_revenue,known_cost_total,row_count,missing_cost_count,created_at").eq("business_id", businessId).order("period_end", { ascending: false }),
     supabase.from("zig_abc_imports").select("id,file_name,total_value,row_count,missing_cost_count,created_at").eq("business_id", businessId).order("created_at", { ascending: false }),
+    supabase.rpc("get_zig_sales_dashboard", { p_business_id: Number(businessId), p_period_start: range.start, p_period_end: range.end }),
   ]);
-  const firstError = [sales.error, expenses.error, products.error, suppliers.error, areas.error, imports.error, profitabilityImports.error, abcImports.error].find(Boolean);
+  const firstError = [sales.error, expenses.error, products.error, suppliers.error, areas.error, imports.error, profitabilityImports.error, abcImports.error, zig.error].find(Boolean);
   if (firstError) throw firstError;
   const saleIds = (sales.data ?? []).map((sale) => sale.id);
   const importIds = (sales.data ?? []).map((sale) => sale.import_id).filter(Boolean) as string[];
@@ -80,7 +95,7 @@ async function fetchData(businessId: string): Promise<DataState> {
   ]);
   const detailError = [items.error, payments.error, profitabilityItems.error, abcItems.error].find(Boolean);
   if (detailError) throw detailError;
-  return { sales: (sales.data ?? []) as unknown as Sale[], saleItems: (items.data ?? []) as unknown as SaleItem[], payments: (payments.data ?? []) as PaymentMethod[], expenses: (expenses.data ?? []) as Expense[], imports: (imports.data ?? []) as ImportRow[], profitabilityImports: (profitabilityImports.data ?? []) as ProfitabilityImport[], profitabilityItems: (profitabilityItems.data ?? []) as ProfitabilityItem[], abcImports: (abcImports.data ?? []) as AbcImport[], abcItems: (abcItems.data ?? []) as AbcItem[], products: products.count ?? 0, suppliers: suppliers.count ?? 0, areas: (areas.data ?? []) as Area[] };
+  return { sales: (sales.data ?? []) as unknown as Sale[], saleItems: (items.data ?? []) as unknown as SaleItem[], payments: (payments.data ?? []) as PaymentMethod[], expenses: (expenses.data ?? []) as Expense[], imports: (imports.data ?? []) as ImportRow[], profitabilityImports: (profitabilityImports.data ?? []) as ProfitabilityImport[], profitabilityItems: (profitabilityItems.data ?? []) as ProfitabilityItem[], abcImports: (abcImports.data ?? []) as AbcImport[], abcItems: (abcItems.data ?? []) as AbcItem[], zig: (zig.data as ZigDashboard | null) ?? EMPTY_ZIG, products: products.count ?? 0, suppliers: suppliers.count ?? 0, areas: (areas.data ?? []) as Area[] };
 }
 
 export function DashboardShell() {
@@ -95,12 +110,15 @@ export function DashboardShell() {
   const [userId, setUserId] = useState("");
   const [data, setData] = useState<DataState>(EMPTY_DATA);
   const [fatalError, setFatalError] = useState("");
-  const [period, setPeriod] = useState("all");
+  const [period, setPeriod] = useState("this_month");
+  const [customStart, setCustomStart] = useState(isoInSaoPaulo());
+  const [customEnd, setCustomEnd] = useState(isoInSaoPaulo());
+  const range = selectedRange(period, customStart, customEnd);
 
-  async function refresh(businessId = membership?.business_id) {
+  async function refresh(businessId = membership?.business_id, requestedRange = range) {
     if (!businessId) return;
     setRefreshing(true);
-    try { setData(await fetchData(businessId)); } catch { setFatalError("Não foi possível carregar os dados do painel."); }
+    try { setData(await fetchData(businessId, requestedRange)); setFatalError(""); } catch { setFatalError("Não foi possível carregar os dados do painel."); }
     finally { setRefreshing(false); }
   }
 
@@ -120,7 +138,7 @@ export function DashboardShell() {
       setProfile((profileResult.data as Profile | null) ?? { full_name: user.email?.split("@")[0] ?? "Usuário", email: user.email ?? "" });
       setMembership(current); setUserId(user.id);
       if (current?.status === "active") {
-        try { setData(await fetchData(current.business_id)); } catch { setFatalError("Não foi possível carregar os dados do painel."); }
+        try { setData(await fetchData(current.business_id, selectedRange("this_month", isoInSaoPaulo(), isoInSaoPaulo()))); } catch { setFatalError("Não foi possível carregar os dados do painel."); }
       }
       setLoading(false);
     }
@@ -130,11 +148,11 @@ export function DashboardShell() {
   }, [router]);
 
   const activeNav = NAV_ITEMS.find((item) => item.id === section) ?? NAV_ITEMS[0];
-  const visibleSales = period === "all" ? data.sales : data.sales.filter((sale) => `${sale.period_start}|${sale.period_end}` === period);
+  const visibleSales = data.sales.filter((sale) => (sale.period_end ?? sale.business_date) >= range.start && (sale.period_start ?? sale.business_date) <= range.end);
   const selectedSaleIds = new Set(visibleSales.map((sale) => String(sale.id)));
   const visibleItems = data.saleItems.filter((item) => selectedSaleIds.has(String(item.sale_id)));
-  const visibleExpenses = period === "all" ? data.expenses : data.expenses.filter((expense) => { const [start, end] = period.split("|"); return expense.expense_date >= start && expense.expense_date <= end; });
-  const visibleProfitabilityImports = period === "all" ? data.profitabilityImports : data.profitabilityImports.filter((row) => `${row.period_start}|${row.period_end}` === period);
+  const visibleExpenses = data.expenses.filter((expense) => expense.expense_date >= range.start && expense.expense_date <= range.end);
+  const visibleProfitabilityImports = data.profitabilityImports.filter((row) => row.period_end >= range.start && row.period_start <= range.end);
   const selectedProfitabilityIds = new Set(visibleProfitabilityImports.map((row) => String(row.id)));
   const visibleProfitabilityItems = data.profitabilityItems.filter((row) => selectedProfitabilityIds.has(String(row.import_id)));
 
@@ -153,13 +171,13 @@ export function DashboardShell() {
       <div className="sidebar-footer"><button className="user-menu" title={profile?.full_name ?? "Usuário"}><span className="user-avatar">{(profile?.full_name ?? "D").charAt(0).toUpperCase()}</span><span className="user-copy"><strong>{profile?.full_name ?? "Usuário"}</strong><small>{membership.role === "owner" ? "Proprietário" : "Gerência"}</small></span></button><button className="logout-button" onClick={signOut} aria-label="Sair"><LogOut size={18} /></button></div>
       <button className="compact-toggle" onClick={() => setSidebarCompact((current) => !current)} aria-label={sidebarCompact ? "Expandir menu" : "Recolher menu"}><PanelLeftClose size={17} /><span>Recolher menu</span></button>
     </aside>
-    <main className="workspace"><header className="workspace-header"><div><p className="breadcrumb">Dopamina / {activeNav.label}</p><h1>{activeNav.label}</h1></div><div className="workspace-actions"><label className="search-box"><Search size={17} /><input type="search" placeholder="Buscar no sistema" /><kbd>⌘ K</kbd></label><select className="period-select" value={period} onChange={(event) => setPeriod(event.target.value)} aria-label="Período"><option value="all">Todos os períodos</option>{data.sales.map((sale) => <option key={sale.id} value={`${sale.period_start}|${sale.period_end}`}>{dateLabel(sale.period_start)} a {dateLabel(sale.period_end)}</option>)}</select></div></header>
-      <div className="workspace-content"><SectionContent section={section} setSection={setSection} businessId={membership.business_id} userId={userId} data={data} sales={visibleSales} saleItems={visibleItems} expenses={visibleExpenses} profitabilityImports={visibleProfitabilityImports} profitabilityItems={visibleProfitabilityItems} refreshing={refreshing} onRefresh={() => refresh()} /></div>
+    <main className="workspace"><header className="workspace-header"><div><p className="breadcrumb">Dopamina / {activeNav.label}</p><h1>{activeNav.label}</h1></div><div className="workspace-actions"><label className="search-box"><Search size={17} /><input type="search" placeholder="Buscar no sistema" /><kbd>⌘ K</kbd></label><select className="period-select" value={period} onChange={(event) => { const next = event.target.value; setPeriod(next); refresh(membership.business_id, selectedRange(next, customStart, customEnd)); }} aria-label="Período"><option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="7d">Últimos 7 dias</option><option value="this_month">Este mês</option><option value="last_month">Mês anterior</option><option value="custom">Período personalizado</option></select>{period === "custom" && <div className="custom-period"><input aria-label="Início do período" type="date" value={customStart} max={customEnd} onChange={(event) => { const next = event.target.value; setCustomStart(next); refresh(membership.business_id, selectedRange("custom", next, customEnd)); }} /><span>até</span><input aria-label="Fim do período" type="date" value={customEnd} min={customStart} onChange={(event) => { const next = event.target.value; setCustomEnd(next); refresh(membership.business_id, selectedRange("custom", customStart, next)); }} /></div>}</div></header>
+      <div className="workspace-content"><SectionContent section={section} setSection={setSection} businessId={membership.business_id} userId={userId} data={data} sales={visibleSales} saleItems={visibleItems} expenses={visibleExpenses} profitabilityImports={visibleProfitabilityImports} profitabilityItems={visibleProfitabilityItems} range={range} refreshing={refreshing} onRefresh={() => refresh()} /></div>
     </main>
   </div>;
 }
 
-function SectionContent(props: { section: Section; setSection: (section: Section) => void; businessId: string; userId: string; data: DataState; sales: Sale[]; saleItems: SaleItem[]; expenses: Expense[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; refreshing: boolean; onRefresh: () => Promise<void> }) {
+function SectionContent(props: { section: Section; setSection: (section: Section) => void; businessId: string; userId: string; data: DataState; sales: Sale[]; saleItems: SaleItem[]; expenses: Expense[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; range: DateRange; refreshing: boolean; onRefresh: () => Promise<void> }) {
   if (props.section === "visao-geral") return <Overview {...props} />;
   if (props.section === "vendas") return <SalesPage {...props} />;
   if (props.section === "cmv") return <CmvPage {...props} />;
@@ -180,28 +198,35 @@ function ModuleHero({ eyebrow, title, description, action, icon, onAction }: { e
 }
 
 function Overview({ sales, expenses, data, setSection }: Parameters<typeof SectionContent>[0]) {
-  const revenue = sales.reduce((sum, sale) => sum + Number(sale.revenue_amount ?? sale.gross_amount), 0);
+  const apiHasData = data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
+  const revenue = apiHasData ? Number(data.zig.summary.revenue_cents) / 100 : sales.reduce((sum, sale) => sum + Number(sale.revenue_amount ?? sale.gross_amount), 0);
   const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
   const visibleSaleIds = new Set(sales.map((sale) => String(sale.id)));
   const profitabilityImports = data.profitabilityImports.filter((row) => visibleSaleIds.has(String(row.sale_id)));
   const knownCost = profitabilityImports.reduce((sum, row) => sum + Number(row.known_cost_total), 0);
   const result = revenue - expenseTotal - knownCost;
   const current = sales[0];
-  return <section className="overview-page"><div className="overview-intro"><div><p className="page-kicker">Resumo gerencial</p><h2>Panorama financeiro do Dopamina</h2><span>Indicadores calculados a partir da base única de vendas e despesas.</span></div><button className="accent-button" onClick={() => setSection("vendas")}><FileUp size={17} /> Importar relatórios Zig</button></div>
-    <div className="metric-grid"><MetricCard label="Receita" value={MONEY.format(revenue)} icon={<TrendingUp size={20} />} tone="green" note={sales.length ? `${sales.length} período(s) importado(s)` : "Sem vendas importadas"} /><MetricCard label="Despesas" value={MONEY.format(expenseTotal)} icon={<ArrowDownRight size={20} />} tone="red" note={`${expenses.length} lançamento(s)`} /><MetricCard label="Resultado conhecido" value={MONEY.format(result)} icon={<ArrowUpRight size={20} />} tone="purple" note={knownCost ? "Receita − despesas − CMV conhecido" : "Importe o CMV para completar"} /><MetricCard label="CMV conhecido" value={MONEY.format(knownCost)} icon={<BarChart3 size={20} />} tone="yellow" note={profitabilityImports.length ? `${profitabilityImports.reduce((sum, row) => sum + row.missing_cost_count, 0)} produto(s) sem custo` : "Sem relatório de CMV"} /></div>
+  const configuredSources = data.zig.sync.filter((row) => row.last_success_at).length + (profitabilityImports.length ? 1 : 0);
+  const health = Math.round(configuredSources / 3 * 100);
+  return <section className="overview-page"><div className="overview-intro"><div><p className="page-kicker">Resumo gerencial</p><h2>Panorama financeiro do Dopamina</h2><span>Indicadores calculados a partir da base única de vendas e despesas.</span></div><button className="accent-button" onClick={() => setSection("vendas")}><FileUp size={17} /> Sincronizar com a Zig</button></div>
+    <div className="metric-grid"><MetricCard label="Receita" value={MONEY.format(revenue)} icon={<TrendingUp size={20} />} tone="green" note={apiHasData ? "API Zig · faturamento recebido" : sales.length ? "Relatório importado" : "Sem vendas no período"} /><MetricCard label="Despesas" value={MONEY.format(expenseTotal)} icon={<ArrowDownRight size={20} />} tone="red" note={`${expenses.length} lançamento(s)`} /><MetricCard label="Resultado conhecido" value={MONEY.format(result)} icon={<ArrowUpRight size={20} />} tone="purple" note={knownCost ? "Receita − despesas − CMV conhecido" : "Importe o CMV para completar"} /><MetricCard label="CMV conhecido" value={MONEY.format(knownCost)} icon={<BarChart3 size={20} />} tone="yellow" note={profitabilityImports.length ? `${profitabilityImports.reduce((sum, row) => sum + row.missing_cost_count, 0)} produto(s) sem custo` : "Sem relatório de CMV"} /></div>
     <div className="dashboard-grid"><article className="chart-card wide-card"><div className="card-title-row"><div><p>Desempenho</p><h3>Receita x despesas</h3></div><span>{current ? `${dateLabel(current.period_start)} a ${dateLabel(current.period_end)}` : "Sem período"}</span></div><ComparisonBars revenue={revenue} expenses={expenseTotal} /></article><article className="chart-card"><div className="card-title-row"><div><p>Estrutura</p><h3>Base cadastrada</h3></div></div><div className="base-stats"><div><span><PackageSearch size={18} /> Produtos</span><strong>{data.products}</strong></div><div><span><UsersRound size={18} /> Fornecedores</span><strong>{data.suppliers}</strong></div><div><span><Building2 size={18} /> Áreas</span><strong>{data.areas.length}</strong></div></div></article>
-      <article className="chart-card wide-card"><div className="card-title-row"><div><p>Faturamento</p><h3>Composição do último fechamento</h3></div></div>{current ? <div className="closing-breakdown"><div><span>Produtos vendidos</span><strong>{MONEY.format(current.product_gross_amount)}</strong></div><div><span>Serviço</span><strong>{MONEY.format(current.service_amount)}</strong></div><div><span>Descontos</span><strong>-{MONEY.format(current.discount_amount)}</strong></div><div><span>Contas em aberto</span><strong>-{MONEY.format(current.open_accounts_amount)}</strong></div></div> : <EmptyMini text="Importe os relatórios da Zig para ver a composição." />}</article>
-      <article className="chart-card"><div className="card-title-row"><div><p>Status</p><h3>Saúde dos dados</h3></div></div><div className="data-health"><div className="health-ring"><strong>{profitabilityImports.length ? "83%" : sales.length ? "67%" : "0%"}</strong><span>configurado</span></div><p>{profitabilityImports.length ? "Vendas, despesas e CMV estão conectados. Complete custos ausentes para fechar a margem." : sales.length ? "Vendas e despesas estão prontas. Importe o CMV para calcular rentabilidade." : "Importe as vendas e cadastre as despesas para liberar os indicadores."}</p></div></article></div></section>;
+      <article className="chart-card wide-card"><div className="card-title-row"><div><p>Faturamento</p><h3>{apiHasData ? "Composição sincronizada" : "Composição do último fechamento"}</h3></div></div>{apiHasData ? <div className="closing-breakdown"><div><span>Vendas brutas</span><strong>{MONEY.format(Number(data.zig.summary.gross_cents) / 100)}</strong></div><div><span>Recebimentos</span><strong>{MONEY.format(Number(data.zig.summary.revenue_cents) / 100)}</strong></div><div><span>Descontos</span><strong>-{MONEY.format(Number(data.zig.summary.discount_cents) / 100)}</strong></div><div><span>Transações válidas</span><strong>{NUMBER.format(data.zig.summary.transaction_count)}</strong></div></div> : current ? <div className="closing-breakdown"><div><span>Produtos vendidos</span><strong>{MONEY.format(current.product_gross_amount)}</strong></div><div><span>Serviço</span><strong>{MONEY.format(current.service_amount)}</strong></div><div><span>Descontos</span><strong>-{MONEY.format(current.discount_amount)}</strong></div><div><span>Contas em aberto</span><strong>-{MONEY.format(current.open_accounts_amount)}</strong></div></div> : <EmptyMini text="Sincronize a Zig para ver a composição." />}</article>
+      <article className="chart-card"><div className="card-title-row"><div><p>Status</p><h3>Saúde dos dados</h3></div></div><div className="data-health"><div className="health-ring"><strong>{health}%</strong><span>configurado</span></div><p>{configuredSources === 3 ? "Produtos, pagamentos e CMV estão conectados. Complete custos ausentes para fechar a margem." : "O percentual agora reflete fontes realmente sincronizadas, sem valor simulado."}</p></div></article></div></section>;
 }
 
 function SalesPage(props: Parameters<typeof SectionContent>[0]) {
   const [showImport, setShowImport] = useState(false);
   const [query, setQuery] = useState("");
-  const gross = props.sales.reduce((sum, sale) => sum + Number(sale.gross_amount), 0);
-  const discounts = props.sales.reduce((sum, sale) => sum + Number(sale.discount_amount), 0);
-  const revenue = props.sales.reduce((sum, sale) => sum + Number(sale.revenue_amount ?? sale.gross_amount), 0);
-  const quantity = props.saleItems.reduce((sum, item) => sum + Number(item.quantity), 0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState("");
+  const apiHasData = props.data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
+  const gross = apiHasData ? Number(props.data.zig.summary.gross_cents) / 100 : props.sales.reduce((sum, sale) => sum + Number(sale.gross_amount), 0);
+  const discounts = apiHasData ? Number(props.data.zig.summary.discount_cents) / 100 : props.sales.reduce((sum, sale) => sum + Number(sale.discount_amount), 0);
+  const revenue = apiHasData ? Number(props.data.zig.summary.revenue_cents) / 100 : props.sales.reduce((sum, sale) => sum + Number(sale.revenue_amount ?? sale.gross_amount), 0);
+  const quantity = apiHasData ? Number(props.data.zig.summary.quantity) : props.saleItems.reduce((sum, item) => sum + Number(item.quantity), 0);
   const grouped = useMemo(() => {
+    if (apiHasData) return props.data.zig.products.filter((row) => `${row.name} ${row.category} ${row.area}`.toLowerCase().includes(query.toLowerCase())).map((row) => ({ name: row.name, category: row.category, area: row.area, quantity: Number(row.quantity), gross: Number(row.gross_cents) / 100, discount: Number(row.discount_cents) / 100, net: Number(row.net_cents) / 100 })).sort((a, b) => b.net - a.net);
     const map = new Map<string, { name: string; category: string; area: string; quantity: number; gross: number; discount: number; net: number }>();
     for (const row of props.saleItems) {
       const item = nested(row.items); const category = nested(item?.categories)?.name ?? "Sem categoria"; const area = nested(row.areas)?.name ?? "Geral"; const name = item?.name ?? "Produto";
@@ -209,12 +234,16 @@ function SalesPage(props: Parameters<typeof SectionContent>[0]) {
       current.quantity += Number(row.quantity); current.gross += Number(row.gross_amount); current.discount += Number(row.discount_amount); current.net += Number(row.gross_amount) - Number(row.discount_amount); map.set(key, current);
     }
     return [...map.values()].filter((row) => `${row.name} ${row.category} ${row.area}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => b.net - a.net);
-  }, [props.saleItems, query]);
-  return <section><ModuleHero eyebrow="Resultados" title="Vendas e faturamento" description="Fechamento, produtos, descontos e formas de pagamento conciliados com a Zig." action="Importar relatórios" icon={<ShoppingCart size={22} />} onAction={() => setShowImport(true)} />
+  }, [apiHasData, props.data.zig.products, props.saleItems, query]);
+  const apiPayments = props.data.zig.payments.map((row, index) => ({ id: `zig-${index}`, import_id: "zig", payment_method: row.payment_name, amount: Number(row.value_cents) / 100, percentage: revenue ? Number(row.value_cents) / 100 / revenue : 0 }));
+  async function synchronize() { setSyncing(true); setSyncMessage(""); const { data: session } = await supabase.auth.getSession(); const token = session.session?.access_token; if (!token) { setSyncMessage("Sua sessão expirou. Entre novamente."); setSyncing(false); return; } try { const response = await fetch("/api/zig/sync", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ startDate: props.range.start, endDate: props.range.end }) }); const result = await response.json() as { error?: string; status?: string }; if (!response.ok) throw new Error(result.error ?? "A sincronização falhou."); setSyncMessage(result.status === "partial" ? "Sincronização parcial: consulte o histórico de integrações." : "Sincronização concluída com dados reais da Zig."); await props.onRefresh(); } catch (error) { setSyncMessage(error instanceof Error ? error.message : "Não foi possível sincronizar a Zig."); } finally { setSyncing(false); } }
+  return <section><ModuleHero eyebrow="Resultados" title="Vendas e faturamento" description={apiHasData ? "Dados reais sincronizados da API Zig; estornos são excluídos dos totais." : "Sem dados da API neste período; exibindo o relatório disponível quando houver."} action={syncing ? "Sincronizando..." : "Sincronizar agora"} icon={<ShoppingCart size={22} />} onAction={syncing ? undefined : synchronize} />
+    {syncMessage && <div className={syncMessage.includes("concluída") ? "sync-message success" : "sync-message"}>{syncMessage}</div>}
     <div className="section-kpis"><MiniKpi label="Faturamento bruto" value={MONEY.format(gross)} /><MiniKpi label="Receita do período" value={MONEY.format(revenue)} /><MiniKpi label="Descontos" value={MONEY.format(discounts)} /><MiniKpi label="Itens vendidos" value={NUMBER.format(quantity)} /></div>
-    <div className="sales-layout"><article className="chart-card"><div className="card-title-row"><div><p>Recebimentos</p><h3>Formas de pagamento</h3></div></div><PaymentBars payments={props.data.payments} sales={props.sales} /></article><article className="chart-card"><div className="card-title-row"><div><p>Ranking</p><h3>Top produtos</h3></div></div><Ranking rows={grouped.slice(0, 6)} /></article></div>
+    <div className="sales-layout"><article className="chart-card"><div className="card-title-row"><div><p>Recebimentos</p><h3>Formas de pagamento</h3></div><span>{apiHasData ? "API Zig" : "Relatório"}</span></div><PaymentBars payments={apiHasData ? apiPayments : props.data.payments} sales={apiHasData ? [{ import_id: "zig" } as Sale] : props.sales} /></article><article className="chart-card"><div className="card-title-row"><div><p>Ranking</p><h3>Top produtos</h3></div></div><Ranking rows={grouped.slice(0, 6)} /></article></div>
     <div className="module-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto, categoria ou área" /></label><span className="table-count">{grouped.length} combinações</span></div>
     <div className="data-table-card"><div className="responsive-table sales-table"><div className="table-row table-header"><span>Produto</span><span>Categoria</span><span>Área</span><span>Quantidade</span><span>Descontos</span><span>Valor líquido</span></div>{grouped.length ? grouped.map((row) => <div className="table-row" key={`${row.name}-${row.area}`}><strong>{row.name}</strong><span>{row.category}</span><span>{row.area}</span><span>{NUMBER.format(row.quantity)}</span><span>{MONEY.format(row.discount)}</span><strong>{MONEY.format(row.net)}</strong></div>) : <EmptyMini text="Nenhuma venda encontrada no período." />}</div></div>
+    <button className="spreadsheet-fallback" onClick={() => setShowImport(true)}><FileSpreadsheet size={15} /> Importar planilhas como contingência</button>
     {showImport && <ImportModal businessId={props.businessId} onClose={() => setShowImport(false)} onImported={async () => { await props.onRefresh(); setShowImport(false); }} />}
   </section>;
 }
@@ -266,7 +295,9 @@ function ExpensesPage(props: Parameters<typeof SectionContent>[0]) {
 
 function ImportsPage(props: Parameters<typeof SectionContent>[0]) {
   const [showImport, setShowImport] = useState(false);
-  return <section><ModuleHero eyebrow="Integrações" title="Importações da Zig" description="Histórico dos arquivos usados para alimentar vendas e faturamento." action="Enviar relatórios" icon={<FileSpreadsheet size={22} />} onAction={() => setShowImport(true)} /><div className="data-table-card imports-card"><div className="responsive-table imports-table"><div className="table-row table-header"><span>Período</span><span>Arquivo</span><span>Linhas</span><span>Status</span><span>Importado em</span></div>{props.data.imports.length ? props.data.imports.map((row) => <div className="table-row" key={row.id}><span>{dateLabel(row.period_start)} a {dateLabel(row.period_end)}</span><strong>{row.file_name}</strong><span>{row.row_count}</span><StatusBadge status={row.status as Expense["status"]} /><span>{DATE.format(new Date(row.created_at))}</span></div>) : <EmptyMini text="Nenhuma importação realizada." />}</div></div>{showImport && <ImportModal businessId={props.businessId} onClose={() => setShowImport(false)} onImported={async () => { await props.onRefresh(); setShowImport(false); }} />}</section>;
+  return <section><ModuleHero eyebrow="Integrações" title="Integração Zig" description="A API é a fonte principal; planilhas permanecem disponíveis como contingência e para dados ainda sem endpoint." action="Enviar planilhas" icon={<FileSpreadsheet size={22} />} onAction={() => setShowImport(true)} />
+    <div className="sync-state-grid">{(["saida-produtos", "faturamento"] as const).map((endpoint) => { const state = props.data.zig.sync.find((row) => row.endpoint === endpoint); return <article key={endpoint}><span>{endpoint === "saida-produtos" ? "Produtos vendidos" : "Faturamento"}</span><strong className={state?.status === "completed" ? "success-text" : "warning-text"}>{state?.status === "completed" ? "Sincronizado" : state?.status === "failed" ? "Falhou" : "Aguardando configuração"}</strong><small>{state?.last_successful_date ? `Último dia: ${dateLabel(state.last_successful_date)}` : "Nenhuma execução concluída"}</small></article>; })}</div>
+    <div className="data-table-card imports-card"><div className="responsive-table imports-table"><div className="table-row table-header"><span>Período</span><span>Arquivo</span><span>Linhas</span><span>Status</span><span>Importado em</span></div>{props.data.imports.length ? props.data.imports.map((row) => <div className="table-row" key={row.id}><span>{dateLabel(row.period_start)} a {dateLabel(row.period_end)}</span><strong>{row.file_name}</strong><span>{row.row_count}</span><StatusBadge status={row.status as Expense["status"]} /><span>{DATE.format(new Date(row.created_at))}</span></div>) : <EmptyMini text="Nenhuma planilha importada." />}</div></div>{showImport && <ImportModal businessId={props.businessId} onClose={() => setShowImport(false)} onImported={async () => { await props.onRefresh(); setShowImport(false); }} />}</section>;
 }
 
 function ImportModal({ businessId, onClose, onImported }: { businessId: string; onClose: () => void; onImported: () => Promise<void> }) {

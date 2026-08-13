@@ -19,6 +19,11 @@ Painel administrativo privado do Bar Dopamina. A aplicação centraliza autentic
 ```env
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+ZIG_API_TOKEN=
+ZIG_REDE_ID=c2e57314-673f-408c-926a-a553dd187e8f
+ZIG_LOJA_ID=e40336a8-5039-4237-b75c-972c79c7e467
+CRON_SECRET=
 ```
 
 ## Publicação
@@ -51,6 +56,10 @@ Todo cadastro novo entra como `manager` com status `pending`. O primeiro proprie
 | Rastreabilidade | `audit_logs` |
 
 As telas não criam cópias paralelas desses dados. Por exemplo, CMV, estoque e compras compartilham os mesmos itens e custos.
+
+## API Zig
+
+Vendas, faturamento e formas de pagamento possuem uma integração server-only e incremental. A sincronização consulta a Zig por dia, registra tentativas, não duplica transações e mantém as planilhas como contingência. O mapeamento completo, regras e pendências estão em [`docs/zig-api-integration.md`](docs/zig-api-integration.md).
 
 ## Segurança
 
