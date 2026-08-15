@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { PurchasesPage } from "@/components/purchases-page";
+import { PersonnelPage } from "@/components/personnel-page";
 import { parseZigReports, type ZigImportPayload } from "@/lib/zig-import";
 import {
   parseZigAbcReport,
@@ -20,14 +21,14 @@ import {
   type ZigProfitabilityPayload,
 } from "@/lib/zig-analytics-import";
 
-type Section = "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" |
+type Section = "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" |
   "planejamento" | "cadastros" | "importacoes" | "configuracoes";
 type Membership = { business_id: string; role: "owner" | "manager"; status: "active" | "pending" | "suspended"; businesses: { name: string } | { name: string }[] | null };
 type Profile = { full_name: string; email: string };
 type Sale = { id: string; import_id: string | null; period_start: string | null; period_end: string | null; business_date: string; gross_amount: number; discount_amount: number; product_gross_amount: number; service_amount: number; revenue_amount: number | null; closing_net_amount: number | null; open_accounts_amount: number; recharge_balance_amount: number; sales_imports: { file_name: string; row_count: number; created_at: string } | { file_name: string; row_count: number; created_at: string }[] | null };
 type SaleItem = { id: string; sale_id: string; quantity: number; gross_amount: number; discount_amount: number; transaction_type: string | null; items: { name: string; sku: string | null; categories: { name: string } | { name: string }[] | null } | { name: string; sku: string | null; categories: { name: string } | { name: string }[] | null }[]; areas: { name: string } | { name: string }[] | null };
 type PaymentMethod = { id: string; import_id: string; payment_method: string; amount: number; percentage: number | null };
-type Expense = { id: string; purchase_id: string | null; area_id: string | null; category: string; description: string; expense_date: string; due_date: string | null; paid_at: string | null; amount: number; payment_method: string | null; status: "draft" | "pending" | "completed" | "cancelled"; is_recurring: boolean; cost_behavior: "fixed" | "variable"; areas: { name: string } | { name: string }[] | null };
+type Expense = { id: string; purchase_id: string | null; source_type: string | null; source_id: string | null; recurrence_end: string | null; area_id: string | null; category: string; description: string; expense_date: string; due_date: string | null; paid_at: string | null; amount: number; payment_method: string | null; status: "draft" | "pending" | "completed" | "cancelled"; is_recurring: boolean; cost_behavior: "fixed" | "variable"; areas: { name: string } | { name: string }[] | null };
 type ImportRow = { id: string; file_name: string; period_start: string | null; period_end: string | null; row_count: number; status: string; created_at: string };
 type Area = { id: string; name: string };
 type ProductSectorKey = "bar" | "drinks" | "cozinha" | "churrasqueira";
@@ -85,6 +86,7 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: "produtos", label: "Produtos", icon: <PackageSearch size={19} /> },
   { id: "estoque", label: "Estoque", icon: <Boxes size={19} /> },
   { id: "compras", label: "Compras", icon: <ShoppingBasket size={19} /> },
+  { id: "pessoal", label: "Pessoal", icon: <UsersRound size={19} /> },
   { id: "planejamento", label: "Planejamento", icon: <CalendarRange size={19} /> },
   { id: "cadastros", label: "Cadastros", icon: <ClipboardList size={19} /> },
   { id: "configuracoes", label: "Configurações", icon: <Settings size={19} /> },
@@ -131,7 +133,7 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
   const previousRange = previousEquivalentRange(range);
   const [sales, expenses, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig, previousZig, sectorProfitability, previousSectorProfitability, costHistory, recipes] = await Promise.all([
     supabase.from("sales").select("id,import_id,period_start,period_end,business_date,gross_amount,discount_amount,product_gross_amount,service_amount,revenue_amount,closing_net_amount,open_accounts_amount,recharge_balance_amount,sales_imports(file_name,row_count,created_at)").eq("business_id", businessId).order("business_date", { ascending: false }),
-    supabase.from("expenses").select("id,purchase_id,area_id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring,cost_behavior,areas(name)").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
+    supabase.from("expenses").select("id,purchase_id,source_type,source_id,recurrence_end,area_id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring,cost_behavior,areas(name)").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
     supabase.from("items").select("id,area_id,name,sku,item_type,purchase_unit,consumption_unit,costing_method,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(id,name)").eq("business_id", businessId).order("name"),
     supabase.from("suppliers").select("id", { count: "exact", head: true }).eq("business_id", businessId),
     supabase.from("areas").select("id,name").eq("business_id", businessId).eq("is_active", true).order("sort_order"),
@@ -222,7 +224,7 @@ export function DashboardShell() {
   const visibleSales = data.sales.filter((sale) => (sale.period_end ?? sale.business_date) >= range.start && (sale.period_start ?? sale.business_date) <= range.end);
   const selectedSaleIds = new Set(visibleSales.map((sale) => String(sale.id)));
   const visibleItems = data.saleItems.filter((item) => selectedSaleIds.has(String(item.sale_id)));
-  const visibleExpenses = data.expenses.filter((expense) => expense.expense_date >= range.start && expense.expense_date <= range.end);
+  const visibleExpenses = data.expenses.filter((expense) => expense.is_recurring ? expense.expense_date <= range.end && (!expense.recurrence_end || expense.recurrence_end >= range.start) : expense.expense_date >= range.start && expense.expense_date <= range.end);
   const visibleProfitabilityImports = data.profitabilityImports.filter((row) => row.period_end >= range.start && row.period_start <= range.end);
   const selectedProfitabilityIds = new Set(visibleProfitabilityImports.map((row) => String(row.id)));
   const visibleProfitabilityItems = data.profitabilityItems.filter((row) => selectedProfitabilityIds.has(String(row.import_id)));
@@ -256,10 +258,11 @@ function SectionContent(props: { section: Section; setSection: (section: Section
   if (props.section === "produtos") return <ProductProfitabilityPage {...props} />;
   if (props.section === "estoque") return <StockPage {...props} />;
   if (props.section === "compras") return <PurchasesPage businessId={props.businessId} userId={props.userId} range={props.range} items={[...props.data.catalogItems, ...props.data.ingredients]} />;
+  if (props.section === "pessoal") return <PersonnelPage businessId={props.businessId} userId={props.userId} range={props.range} areas={props.data.areas} onExpensesChanged={props.onRefresh} />;
   if (props.section === "planejamento") return <PlanningPage {...props} />;
   if (props.section === "cadastros") return <CatalogPage {...props} />;
   if (props.section === "importacoes") return <ImportsPage {...props} />;
-  const content: Record<Exclude<Section, "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "planejamento" | "cadastros" | "importacoes">, { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; columns: string[] }> = {
+  const content: Record<Exclude<Section, "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" | "planejamento" | "cadastros" | "importacoes">, { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; columns: string[] }> = {
     configuracoes: { eyebrow: "Administração", title: "Configurações e acessos", description: "Gerencie usuários, dados do negócio e histórico de alterações.", action: "Convidar usuário", icon: <UsersRound size={19} />, columns: ["Usuário", "E-mail", "Perfil", "Status", "Último acesso"] },
   };
   const current = content[props.section];
@@ -273,7 +276,6 @@ function ModuleHero({ eyebrow, title, description, action, icon, onAction }: { e
 type FinancialDay = { date: string; revenue: number; expenses: number; result: number };
 
 function datesInRange(range: DateRange) { return Array.from({ length: rangeDays(range) }, (_, index) => shiftDate(range.start, index)); }
-function expensesInRange(rows: Expense[], range: DateRange) { return rows.filter((row) => row.expense_date >= range.start && row.expense_date <= range.end); }
 function salesInRange(rows: Sale[], range: DateRange) { return rows.filter((row) => row.business_date >= range.start && row.business_date <= range.end); }
 function reportRevenue(rows: Sale[]) { return rows.reduce((sum, row) => sum + Number(row.revenue_amount ?? row.closing_net_amount ?? row.gross_amount), 0); }
 
@@ -283,11 +285,12 @@ function Overview({ sales, expenses, data, setSection, range }: Parameters<typeo
   const selectedDay = dayOverride >= range.start && dayOverride <= range.end ? dayOverride : range.end;
   const zigConnected = data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
   const previousSales = salesInRange(data.sales, previousRange);
-  const previousExpenses = expensesInRange(data.expenses, previousRange);
+  const currentOperational = operationalCostBreakdown(data.expenses, range);
+  const previousOperational = operationalCostBreakdown(data.expenses, previousRange);
   const revenue = zigConnected ? Number(data.zig.summary.net_cents) / 100 : reportRevenue(sales);
   const previousRevenue = zigConnected ? Number(data.previousZig.summary.net_cents) / 100 : reportRevenue(previousSales);
-  const expenseTotal = expenses.reduce((sum, row) => sum + Number(row.amount), 0);
-  const previousExpenseTotal = previousExpenses.reduce((sum, row) => sum + Number(row.amount), 0);
+  const expenseTotal = currentOperational.days.reduce((sum, row) => sum + row.operational, 0);
+  const previousExpenseTotal = previousOperational.days.reduce((sum, row) => sum + row.operational, 0);
   const result = revenue - expenseTotal;
   const previousResult = previousRevenue - previousExpenseTotal;
   const margin = revenue > 0 ? result / revenue : null;
@@ -302,8 +305,7 @@ function Overview({ sales, expenses, data, setSection, range }: Parameters<typeo
   const revenueByDay = new Map<string, number>();
   if (zigConnected) data.zig.daily.forEach((row) => revenueByDay.set(row.operational_date, Number(row.net_cents) / 100));
   else sales.forEach((row) => revenueByDay.set(row.business_date, (revenueByDay.get(row.business_date) ?? 0) + Number(row.revenue_amount ?? row.closing_net_amount ?? row.gross_amount)));
-  const expenseByDay = new Map<string, number>();
-  expenses.forEach((row) => expenseByDay.set(row.expense_date, (expenseByDay.get(row.expense_date) ?? 0) + Number(row.amount)));
+  const expenseByDay = new Map(currentOperational.days.map((row) => [row.date, row.operational]));
   const daily: FinancialDay[] = datesInRange(range).map((date) => {
     const dayRevenue = revenueByDay.get(date) ?? 0;
     const dayExpenses = expenseByDay.get(date) ?? 0;
@@ -448,12 +450,21 @@ function operationalExpenseAmount(expense: Expense, range: DateRange) {
   const amount = Number(expense.amount);
   if (!Number.isFinite(amount) || amount <= 0 || (expense.status !== "pending" && expense.status !== "completed")) return 0;
   if (!expense.is_recurring) return expense.expense_date >= range.start && expense.expense_date <= range.end ? amount : 0;
-  const [year, month] = expense.expense_date.slice(0, 7).split("-").map(Number);
-  const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-  const monthEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
-  const overlapStart = range.start > monthStart ? range.start : monthStart;
-  const overlapEnd = range.end < monthEnd ? range.end : monthEnd;
-  return overlapStart <= overlapEnd ? amount / Number(monthEnd.slice(8, 10)) * rangeDays({ start: overlapStart, end: overlapEnd }) : 0;
+  const effectiveEnd = expense.recurrence_end && expense.recurrence_end < range.end ? expense.recurrence_end : range.end;
+  let cursor = new Date(`${expense.expense_date.slice(0, 7)}-01T12:00:00Z`);
+  const rangeMonth = new Date(`${range.start.slice(0, 7)}-01T12:00:00Z`);
+  if (cursor < rangeMonth) cursor = rangeMonth;
+  let total = 0;
+  while (cursor.toISOString().slice(0, 10) <= effectiveEnd) {
+    const year = cursor.getUTCFullYear(); const month = cursor.getUTCMonth() + 1;
+    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+    const monthEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+    const overlapStart = [range.start, expense.expense_date, monthStart].sort().at(-1)!;
+    const overlapEnd = [effectiveEnd, monthEnd].sort()[0];
+    if (overlapStart <= overlapEnd) total += amount / Number(monthEnd.slice(8, 10)) * rangeDays({ start: overlapStart, end: overlapEnd });
+    cursor = new Date(Date.UTC(year, month, 1, 12));
+  }
+  return total;
 }
 
 function SectorProfitabilityPage(props: Parameters<typeof SectionContent>[0]) {
@@ -917,18 +928,22 @@ function operationalCostBreakdown(expenses: Expense[], range: DateRange) {
       categories.set(expense.category, (categories.get(expense.category) ?? 0) + amount);
       return;
     }
-    const [year, month] = expense.expense_date.slice(0, 7).split("-").map(Number);
-    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
-    const monthEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
-    const overlapStart = range.start > monthStart ? range.start : monthStart;
-    const overlapEnd = range.end < monthEnd ? range.end : monthEnd;
-    if (overlapStart > overlapEnd) return;
-    const dailyAmount = amount / Number(monthEnd.slice(8, 10));
-    datesInRange({ start: overlapStart, end: overlapEnd }).forEach((date) => {
-      const row = daily.get(date);
-      if (row) row.operational += dailyAmount;
-      categories.set(expense.category, (categories.get(expense.category) ?? 0) + dailyAmount);
-    });
+    const effectiveEnd = expense.recurrence_end && expense.recurrence_end < range.end ? expense.recurrence_end : range.end;
+    let cursor = new Date(`${expense.expense_date.slice(0, 7)}-01T12:00:00Z`);
+    const rangeMonth = new Date(`${range.start.slice(0, 7)}-01T12:00:00Z`);
+    if (cursor < rangeMonth) cursor = rangeMonth;
+    while (cursor.toISOString().slice(0, 10) <= effectiveEnd) {
+      const year = cursor.getUTCFullYear(); const month = cursor.getUTCMonth() + 1;
+      const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+      const monthEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+      const overlapStart = [range.start, expense.expense_date, monthStart].sort().at(-1)!;
+      const overlapEnd = [effectiveEnd, monthEnd].sort()[0];
+      if (overlapStart <= overlapEnd) {
+        const dailyAmount = amount / Number(monthEnd.slice(8, 10));
+        datesInRange({ start: overlapStart, end: overlapEnd }).forEach((date) => { const row = daily.get(date); if (row) row.operational += dailyAmount; categories.set(expense.category, (categories.get(expense.category) ?? 0) + dailyAmount); });
+      }
+      cursor = new Date(Date.UTC(year, month, 1, 12));
+    }
   });
   return { days, categories: [...categories].map(([category, amount]) => ({ category, amount })).sort((a, b) => b.amount - a.amount) };
 }
@@ -943,19 +958,18 @@ function ExpensesPage(props: Parameters<typeof SectionContent>[0]) {
   const [selectedDay, setSelectedDay] = useState("");
   const activeSelectedDay = selectedDay >= props.range.start && selectedDay <= props.range.end ? selectedDay : props.range.end;
   const confirmed = props.expenses.filter((expense) => expense.status === "completed" || expense.status === "pending");
+  const operational = operationalCostBreakdown(props.data.expenses, props.range);
   const rows = props.expenses.filter((expense) => {
     const matchesQuery = `${expense.description} ${expense.category} ${expense.payment_method ?? ""}`.toLowerCase().includes(query.toLowerCase());
     return matchesQuery && (categoryFilter === "all" || expense.category === categoryFilter) && (behaviorFilter === "all" || expense.cost_behavior === behaviorFilter) && (recurrenceFilter === "all" || (recurrenceFilter === "recurring") === expense.is_recurring) && (statusFilter === "all" || expense.status === statusFilter);
   });
-  const total = confirmed.reduce((sum, expense) => sum + Number(expense.amount), 0);
+  const total = operational.days.reduce((sum, row) => sum + row.operational, 0);
   const paid = confirmed.filter((expense) => expense.status === "completed").reduce((sum, expense) => sum + Number(expense.amount), 0);
   const pending = confirmed.filter((expense) => expense.status === "pending").reduce((sum, expense) => sum + Number(expense.amount), 0);
   const previousRange = previousEquivalentRange(props.range);
-  const previousConfirmed = props.data.expenses.filter((expense) => expense.expense_date >= previousRange.start && expense.expense_date <= previousRange.end && (expense.status === "completed" || expense.status === "pending"));
-  const previousTotal = previousConfirmed.reduce((sum, expense) => sum + Number(expense.amount), 0);
-  const totalChange = previousTotal > 0 ? (total - previousTotal) / previousTotal : null;
-  const operational = operationalCostBreakdown(props.data.expenses, props.range);
   const previousOperational = operationalCostBreakdown(props.data.expenses, previousRange);
+  const previousTotal = previousOperational.days.reduce((sum, row) => sum + row.operational, 0);
+  const totalChange = previousTotal > 0 ? (total - previousTotal) / previousTotal : null;
   const operationalTotal = operational.days.reduce((sum, row) => sum + row.operational, 0);
   const previousOperationalTotal = previousOperational.days.reduce((sum, row) => sum + row.operational, 0);
   const operationalChange = previousOperationalTotal > 0 ? (operationalTotal - previousOperationalTotal) / previousOperationalTotal : null;
@@ -992,9 +1006,9 @@ function ExpensesPage(props: Parameters<typeof SectionContent>[0]) {
       <article className="expense-analysis-card"><div className="expense-card-heading"><div><span>Classificação</span><strong>Como o custo está composto</strong></div></div>{confirmed.length ? <div className="expense-classification"><ExpenseCompositionRow label="Fixas" value={fixed} total={total} /><ExpenseCompositionRow label="Variáveis" value={variable} total={total} /><ExpenseCompositionRow label="Recorrentes" value={recurring} total={total} /><ExpenseCompositionRow label="Não recorrentes" value={total - recurring} total={total} /></div> : <EmptyMini text="Sem despesas confirmadas para classificar." />}</article>
       <article className="expense-analysis-card"><div className="expense-card-heading"><div><span>Ranking</span><strong>Maiores despesas do período</strong></div></div>{largest.length ? <div className="expense-ranking">{largest.map((expense, index) => <div key={expense.id}><b>{String(index + 1).padStart(2, "0")}</b><span><strong>{expense.description}</strong><small>{expense.category} · {expense.cost_behavior === "fixed" ? "Fixa" : "Variável"}{expense.is_recurring ? " · Recorrente" : ""}</small></span><em>{MONEY.format(expense.amount)}</em></div>)}</div> : <EmptyMini text="Sem despesas confirmadas no período." />}</article>
     </div>
-    <p className="expense-method-note"><TriangleAlert size={14} />O custo operacional considera despesas pagas e pendentes. Rascunhos não entram. Recorrências são rateadas apenas no mês do lançamento e não são projetadas para meses sem registro.</p>
+    <p className="expense-method-note"><TriangleAlert size={14} />O custo operacional considera despesas pagas e pendentes. Recorrências com vigência são projetadas e rateadas pelos dias de cada mês, sem criar lançamentos duplicados.</p>
     <div className="module-toolbar expense-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar despesa, categoria ou pagamento" /></label><select aria-label="Filtrar por categoria" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">Todas as categorias</option>{availableCategories.map((category) => <option key={category}>{category}</option>)}</select><select aria-label="Filtrar por comportamento" value={behaviorFilter} onChange={(event) => setBehaviorFilter(event.target.value)}><option value="all">Fixas e variáveis</option><option value="fixed">Fixas</option><option value="variable">Variáveis</option></select><select aria-label="Filtrar por recorrência" value={recurrenceFilter} onChange={(event) => setRecurrenceFilter(event.target.value)}><option value="all">Todas as recorrências</option><option value="recurring">Recorrentes</option><option value="single">Não recorrentes</option></select><select aria-label="Filtrar por status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos os status</option><option value="completed">Pago</option><option value="pending">Pendente</option><option value="draft">Rascunho</option></select><span className="table-count">{props.refreshing ? "Atualizando..." : `${rows.length} lançamento(s)`}</span></div>
-    <div className="data-table-card"><div className="responsive-table expenses-table"><div className="table-row table-header"><span>Data</span><span>Descrição</span><span>Categoria</span><span>Tipo</span><span>Recorrência</span><span>Status</span><span>Valor</span><span></span></div>{rows.length ? rows.map((expense) => <div className="table-row" key={expense.id}><span>{dateLabel(expense.expense_date)}</span><strong>{expense.description}<small className="expense-payment-hint">{expense.purchase_id ? "Gerado e controlado pela compra" : expense.payment_method || "Pagamento não informado"}</small></strong><span>{expense.category}</span><span className={`expense-type-badge ${expense.cost_behavior}`}>{expense.cost_behavior === "fixed" ? "Fixa" : "Variável"}</span><span>{expense.is_recurring ? <small className="recurring-badge">Recorrente</small> : "Não recorrente"}</span><StatusBadge status={expense.status} /><strong>{MONEY.format(expense.amount)}</strong><span className="row-actions">{!expense.purchase_id && <><button onClick={() => setEditing(expense)} aria-label={`Editar ${expense.description}`}><Pencil size={15} /></button><button onClick={() => remove(expense)} aria-label={`Excluir ${expense.description}`}><Trash2 size={15} /></button></>}</span></div>) : <EmptyMini text="Nenhuma despesa encontrada com os filtros atuais." />}</div></div>
+    <div className="data-table-card"><div className="responsive-table expenses-table"><div className="table-row table-header"><span>Data</span><span>Descrição</span><span>Categoria</span><span>Tipo</span><span>Recorrência</span><span>Status</span><span>Valor</span><span></span></div>{rows.length ? rows.map((expense) => <div className="table-row" key={expense.id}><span>{dateLabel(expense.expense_date)}</span><strong>{expense.description}<small className="expense-payment-hint">{expense.purchase_id ? "Gerado e controlado pela compra" : expense.source_type ? "Gerado e controlado pelo módulo de origem" : expense.payment_method || "Pagamento não informado"}</small></strong><span>{expense.category}</span><span className={`expense-type-badge ${expense.cost_behavior}`}>{expense.cost_behavior === "fixed" ? "Fixa" : "Variável"}</span><span>{expense.is_recurring ? <small className="recurring-badge">Recorrente</small> : "Não recorrente"}</span><StatusBadge status={expense.status} /><strong>{MONEY.format(expense.amount)}</strong><span className="row-actions">{!expense.purchase_id && !expense.source_type && <><button onClick={() => setEditing(expense)} aria-label={`Editar ${expense.description}`}><Pencil size={15} /></button><button onClick={() => remove(expense)} aria-label={`Excluir ${expense.description}`}><Trash2 size={15} /></button></>}</span></div>) : <EmptyMini text="Nenhuma despesa encontrada com os filtros atuais." />}</div></div>
     {editing && <ExpenseModal businessId={props.businessId} userId={props.userId} expense={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={async () => { await props.onRefresh(); setEditing(null); }} />}
   </section>;
 }

@@ -1,0 +1,16 @@
+create index employee_compensation_business_idx on public.employee_compensation_history (business_id);
+create index employee_compensation_created_by_idx on public.employee_compensation_history (created_by);
+create index employees_main_area_idx on public.employees (main_area_id);
+create index employees_created_by_idx on public.employees (created_by);
+create index payroll_closing_items_employee_idx on public.payroll_closing_items (employee_id);
+create index payroll_closings_created_by_idx on public.payroll_closings (created_by);
+create index personnel_cost_entries_area_idx on public.personnel_cost_entries (area_id);
+create index personnel_cost_entries_employee_idx on public.personnel_cost_entries (employee_id);
+create index personnel_cost_entries_closing_idx on public.personnel_cost_entries (payroll_closing_id);
+create index personnel_cost_entries_created_by_idx on public.personnel_cost_entries (created_by);
+create index structural_costs_area_idx on public.structural_costs (area_id);
+create index structural_costs_created_by_idx on public.structural_costs (created_by);
+create index work_shifts_area_idx on public.work_shifts (area_id);
+create index work_shifts_employee_idx on public.work_shifts (employee_id);
+create index work_shifts_closing_idx on public.work_shifts (payroll_closing_id);
+create index work_shifts_created_by_idx on public.work_shifts (created_by);
