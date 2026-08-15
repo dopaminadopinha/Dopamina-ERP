@@ -7,10 +7,11 @@ import {
   ArrowDownRight, ArrowUpRight, BarChart3, Boxes, CalendarRange,
   CheckCircle2, ChefHat, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, FileSpreadsheet,
   FileUp, LayoutDashboard, LogOut, Menu, PackageSearch, Pencil,
-  Plus, ReceiptText, Search, Settings, ShoppingCart, Trash2, TrendingUp, TriangleAlert,
+  Plus, ReceiptText, Search, Settings, ShoppingBasket, ShoppingCart, Trash2, TrendingUp, TriangleAlert,
   UsersRound, WalletCards, X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { PurchasesPage } from "@/components/purchases-page";
 import { parseZigReports, type ZigImportPayload } from "@/lib/zig-import";
 import {
   parseZigAbcReport,
@@ -19,18 +20,18 @@ import {
   type ZigProfitabilityPayload,
 } from "@/lib/zig-analytics-import";
 
-type Section = "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" |
+type Section = "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" |
   "planejamento" | "cadastros" | "importacoes" | "configuracoes";
 type Membership = { business_id: string; role: "owner" | "manager"; status: "active" | "pending" | "suspended"; businesses: { name: string } | { name: string }[] | null };
 type Profile = { full_name: string; email: string };
 type Sale = { id: string; import_id: string | null; period_start: string | null; period_end: string | null; business_date: string; gross_amount: number; discount_amount: number; product_gross_amount: number; service_amount: number; revenue_amount: number | null; closing_net_amount: number | null; open_accounts_amount: number; recharge_balance_amount: number; sales_imports: { file_name: string; row_count: number; created_at: string } | { file_name: string; row_count: number; created_at: string }[] | null };
 type SaleItem = { id: string; sale_id: string; quantity: number; gross_amount: number; discount_amount: number; transaction_type: string | null; items: { name: string; sku: string | null; categories: { name: string } | { name: string }[] | null } | { name: string; sku: string | null; categories: { name: string } | { name: string }[] | null }[]; areas: { name: string } | { name: string }[] | null };
 type PaymentMethod = { id: string; import_id: string; payment_method: string; amount: number; percentage: number | null };
-type Expense = { id: string; area_id: string | null; category: string; description: string; expense_date: string; due_date: string | null; paid_at: string | null; amount: number; payment_method: string | null; status: "draft" | "pending" | "completed" | "cancelled"; is_recurring: boolean; cost_behavior: "fixed" | "variable"; areas: { name: string } | { name: string }[] | null };
+type Expense = { id: string; purchase_id: string | null; area_id: string | null; category: string; description: string; expense_date: string; due_date: string | null; paid_at: string | null; amount: number; payment_method: string | null; status: "draft" | "pending" | "completed" | "cancelled"; is_recurring: boolean; cost_behavior: "fixed" | "variable"; areas: { name: string } | { name: string }[] | null };
 type ImportRow = { id: string; file_name: string; period_start: string | null; period_end: string | null; row_count: number; status: string; created_at: string };
 type Area = { id: string; name: string };
 type ProductSectorKey = "bar" | "drinks" | "cozinha" | "churrasqueira";
-type CatalogItem = { id: string; area_id: string | null; name: string; sku: string | null; item_type: "ingredient" | "product" | "consumable"; consumption_unit: string; costing_method: "simple" | "recipe"; sale_price: number | null; latest_unit_cost: number | null; average_unit_cost: number | null; minimum_stock: number; is_active: boolean; zig_product_id: string | null; categories: { name: string } | { name: string }[] | null; areas: { id: string; name: string } | { id: string; name: string }[] | null };
+type CatalogItem = { id: string; area_id: string | null; name: string; sku: string | null; item_type: "ingredient" | "product" | "consumable"; purchase_unit: string | null; consumption_unit: string; costing_method: "simple" | "recipe"; sale_price: number | null; latest_unit_cost: number | null; average_unit_cost: number | null; minimum_stock: number; is_active: boolean; zig_product_id: string | null; categories: { name: string } | { name: string }[] | null; areas: { id: string; name: string } | { id: string; name: string }[] | null };
 type CostHistory = { id: string; item_id: string; unit_cost: number; effective_from: string; source: "manual" | "recipe" | "import" | "purchase"; created_at: string };
 type Recipe = { id: string; product_id: string; yield_quantity: number; notes: string | null; effective_from: string; created_at: string };
 type RecipeItem = { id: string; recipe_id: string; ingredient_id: string; quantity: number; waste_percentage: number };
@@ -83,6 +84,7 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: "setores", label: "Setores", icon: <CircleDollarSign size={19} /> },
   { id: "produtos", label: "Produtos", icon: <PackageSearch size={19} /> },
   { id: "estoque", label: "Estoque", icon: <Boxes size={19} /> },
+  { id: "compras", label: "Compras", icon: <ShoppingBasket size={19} /> },
   { id: "planejamento", label: "Planejamento", icon: <CalendarRange size={19} /> },
   { id: "cadastros", label: "Cadastros", icon: <ClipboardList size={19} /> },
   { id: "configuracoes", label: "Configurações", icon: <Settings size={19} /> },
@@ -129,8 +131,8 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
   const previousRange = previousEquivalentRange(range);
   const [sales, expenses, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig, previousZig, sectorProfitability, previousSectorProfitability, costHistory, recipes] = await Promise.all([
     supabase.from("sales").select("id,import_id,period_start,period_end,business_date,gross_amount,discount_amount,product_gross_amount,service_amount,revenue_amount,closing_net_amount,open_accounts_amount,recharge_balance_amount,sales_imports(file_name,row_count,created_at)").eq("business_id", businessId).order("business_date", { ascending: false }),
-    supabase.from("expenses").select("id,area_id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring,cost_behavior,areas(name)").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
-    supabase.from("items").select("id,area_id,name,sku,item_type,consumption_unit,costing_method,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(id,name)").eq("business_id", businessId).order("name"),
+    supabase.from("expenses").select("id,purchase_id,area_id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring,cost_behavior,areas(name)").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
+    supabase.from("items").select("id,area_id,name,sku,item_type,purchase_unit,consumption_unit,costing_method,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(id,name)").eq("business_id", businessId).order("name"),
     supabase.from("suppliers").select("id", { count: "exact", head: true }).eq("business_id", businessId),
     supabase.from("areas").select("id,name").eq("business_id", businessId).eq("is_active", true).order("sort_order"),
     supabase.from("forecasts").select("id,area_id,forecast_type,period_start,period_end,amount,notes,areas(name)").eq("business_id", businessId).order("period_start", { ascending: false }),
@@ -235,7 +237,7 @@ export function DashboardShell() {
     {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu" />}
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
       <div className="sidebar-brand"><div className="sidebar-logo"><Image src="/dopamina-logo.png" alt="Dopamina" width={54} height={50} unoptimized /></div><button className="close-sidebar-mobile" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X size={20} /></button></div>
-      <nav className="sidebar-nav" aria-label="Navegação principal"><span className="nav-caption">Principal</span>{NAV_ITEMS.slice(0, 8).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}<span className="nav-caption nav-caption-space">Sistema</span>{NAV_ITEMS.slice(8).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}</nav>
+      <nav className="sidebar-nav" aria-label="Navegação principal"><span className="nav-caption">Principal</span>{NAV_ITEMS.slice(0, 9).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}<span className="nav-caption nav-caption-space">Sistema</span>{NAV_ITEMS.slice(9).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}</nav>
       <div className="sidebar-footer"><button className="user-menu" title={profile?.full_name ?? "Usuário"}><span className="user-avatar">{(profile?.full_name ?? "D").charAt(0).toUpperCase()}</span><span className="user-copy"><strong>{profile?.full_name ?? "Usuário"}</strong><small>{membership.role === "owner" ? "Proprietário" : "Gerência"}</small></span></button><button className="logout-button" onClick={signOut} aria-label="Sair"><LogOut size={18} /></button></div>
       <button className="compact-toggle" onClick={() => setSidebarCompact((current) => !current)} aria-label={sidebarCompact ? "Expandir menu" : "Recolher menu"}>{sidebarCompact ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}</button>
     </aside>
@@ -253,10 +255,11 @@ function SectionContent(props: { section: Section; setSection: (section: Section
   if (props.section === "setores") return <SectorProfitabilityPage {...props} />;
   if (props.section === "produtos") return <ProductProfitabilityPage {...props} />;
   if (props.section === "estoque") return <StockPage {...props} />;
+  if (props.section === "compras") return <PurchasesPage businessId={props.businessId} userId={props.userId} range={props.range} items={[...props.data.catalogItems, ...props.data.ingredients]} />;
   if (props.section === "planejamento") return <PlanningPage {...props} />;
   if (props.section === "cadastros") return <CatalogPage {...props} />;
   if (props.section === "importacoes") return <ImportsPage {...props} />;
-  const content: Record<Exclude<Section, "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "planejamento" | "cadastros" | "importacoes">, { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; columns: string[] }> = {
+  const content: Record<Exclude<Section, "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "planejamento" | "cadastros" | "importacoes">, { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; columns: string[] }> = {
     configuracoes: { eyebrow: "Administração", title: "Configurações e acessos", description: "Gerencie usuários, dados do negócio e histórico de alterações.", action: "Convidar usuário", icon: <UsersRound size={19} />, columns: ["Usuário", "E-mail", "Perfil", "Status", "Último acesso"] },
   };
   const current = content[props.section];
@@ -991,7 +994,7 @@ function ExpensesPage(props: Parameters<typeof SectionContent>[0]) {
     </div>
     <p className="expense-method-note"><TriangleAlert size={14} />O custo operacional considera despesas pagas e pendentes. Rascunhos não entram. Recorrências são rateadas apenas no mês do lançamento e não são projetadas para meses sem registro.</p>
     <div className="module-toolbar expense-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar despesa, categoria ou pagamento" /></label><select aria-label="Filtrar por categoria" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">Todas as categorias</option>{availableCategories.map((category) => <option key={category}>{category}</option>)}</select><select aria-label="Filtrar por comportamento" value={behaviorFilter} onChange={(event) => setBehaviorFilter(event.target.value)}><option value="all">Fixas e variáveis</option><option value="fixed">Fixas</option><option value="variable">Variáveis</option></select><select aria-label="Filtrar por recorrência" value={recurrenceFilter} onChange={(event) => setRecurrenceFilter(event.target.value)}><option value="all">Todas as recorrências</option><option value="recurring">Recorrentes</option><option value="single">Não recorrentes</option></select><select aria-label="Filtrar por status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos os status</option><option value="completed">Pago</option><option value="pending">Pendente</option><option value="draft">Rascunho</option></select><span className="table-count">{props.refreshing ? "Atualizando..." : `${rows.length} lançamento(s)`}</span></div>
-    <div className="data-table-card"><div className="responsive-table expenses-table"><div className="table-row table-header"><span>Data</span><span>Descrição</span><span>Categoria</span><span>Tipo</span><span>Recorrência</span><span>Status</span><span>Valor</span><span></span></div>{rows.length ? rows.map((expense) => <div className="table-row" key={expense.id}><span>{dateLabel(expense.expense_date)}</span><strong>{expense.description}<small className="expense-payment-hint">{expense.payment_method || "Pagamento não informado"}</small></strong><span>{expense.category}</span><span className={`expense-type-badge ${expense.cost_behavior}`}>{expense.cost_behavior === "fixed" ? "Fixa" : "Variável"}</span><span>{expense.is_recurring ? <small className="recurring-badge">Recorrente</small> : "Não recorrente"}</span><StatusBadge status={expense.status} /><strong>{MONEY.format(expense.amount)}</strong><span className="row-actions"><button onClick={() => setEditing(expense)} aria-label={`Editar ${expense.description}`}><Pencil size={15} /></button><button onClick={() => remove(expense)} aria-label={`Excluir ${expense.description}`}><Trash2 size={15} /></button></span></div>) : <EmptyMini text="Nenhuma despesa encontrada com os filtros atuais." />}</div></div>
+    <div className="data-table-card"><div className="responsive-table expenses-table"><div className="table-row table-header"><span>Data</span><span>Descrição</span><span>Categoria</span><span>Tipo</span><span>Recorrência</span><span>Status</span><span>Valor</span><span></span></div>{rows.length ? rows.map((expense) => <div className="table-row" key={expense.id}><span>{dateLabel(expense.expense_date)}</span><strong>{expense.description}<small className="expense-payment-hint">{expense.purchase_id ? "Gerado e controlado pela compra" : expense.payment_method || "Pagamento não informado"}</small></strong><span>{expense.category}</span><span className={`expense-type-badge ${expense.cost_behavior}`}>{expense.cost_behavior === "fixed" ? "Fixa" : "Variável"}</span><span>{expense.is_recurring ? <small className="recurring-badge">Recorrente</small> : "Não recorrente"}</span><StatusBadge status={expense.status} /><strong>{MONEY.format(expense.amount)}</strong><span className="row-actions">{!expense.purchase_id && <><button onClick={() => setEditing(expense)} aria-label={`Editar ${expense.description}`}><Pencil size={15} /></button><button onClick={() => remove(expense)} aria-label={`Excluir ${expense.description}`}><Trash2 size={15} /></button></>}</span></div>) : <EmptyMini text="Nenhuma despesa encontrada com os filtros atuais." />}</div></div>
     {editing && <ExpenseModal businessId={props.businessId} userId={props.userId} expense={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={async () => { await props.onRefresh(); setEditing(null); }} />}
   </section>;
 }
