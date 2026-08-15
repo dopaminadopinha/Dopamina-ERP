@@ -49,7 +49,11 @@ async function runSync(request: NextRequest, body: { startDate?: string; endDate
     const startDate = body.startDate ?? saoPauloDate(-1);
     const endDate = body.endDate ?? saoPauloDate();
     const result = await syncZigRange(businessId, startDate, endDate);
-    return Response.json(result, { status: result.status === "failed" ? 502 : 200 });
+    const failures = result.results.filter((row) => row.status === "failed" && row.error);
+    const error = failures.length
+      ? [...new Set(failures.map((row) => row.error))].join(" | ")
+      : undefined;
+    return Response.json({ ...result, error }, { status: result.status === "failed" ? 502 : 200 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Falha ao sincronizar a Zig.";
     const missingConfiguration = message.includes("não foi configurada");
