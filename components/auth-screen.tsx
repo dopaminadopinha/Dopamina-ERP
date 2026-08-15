@@ -9,8 +9,6 @@ import {
   EyeOff,
   LockKeyhole,
   Mail,
-  ShieldCheck,
-  Sparkles,
   UserRound,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -156,24 +154,12 @@ export function AuthScreen() {
               unoptimized
             />
           </div>
-          <p className="eyebrow"><Sparkles size={14} /> Gestão inteligente</p>
-          <h1>Decisões melhores começam com dados organizados.</h1>
-          <p className="brand-description">
-            Vendas, CMV, estoque e despesas reunidos em um único lugar para
-            transformar a rotina do Dopamina.
-          </p>
-          <div className="brand-points">
-            <span><ShieldCheck size={16} /> Acesso restrito e seguro</span>
-            <span><span className="status-dot" /> Informações centralizadas</span>
-          </div>
         </div>
       </section>
 
       <section className="form-panel">
         <div className="auth-card">
-          <div className="secure-label">
-            <span className="status-dot" /> Ambiente seguro Dopamina
-          </div>
+          <div className="secure-label">Dopamina Gastrobar</div>
 
           {mode !== "recuperar" ? (
             <div className="auth-tabs" role="tablist" aria-label="Acesso">
@@ -300,14 +286,10 @@ export function AuthScreen() {
               </button>
             ) : null}
           </form>
-
-          <p className="access-note">
-            O acesso é destinado ao proprietário e à gerência do bar.
-          </p>
         </div>
       </section>
 
-      <footer className="auth-footer">© 2026 Dopamina — Sistema de Gestão</footer>
+      <footer className="auth-footer">© 2026 Dopamina - Sistema de Gestão</footer>
     </main>
   );
 }
