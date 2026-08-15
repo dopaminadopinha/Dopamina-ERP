@@ -48,10 +48,10 @@ type ZigDashboard = {
   sync: { endpoint: string; status: string; last_success_at: string | null; last_successful_date: string | null; error_message: string | null }[];
 };
 type DateRange = { start: string; end: string };
-type DataState = { sales: Sale[]; saleItems: SaleItem[]; payments: PaymentMethod[]; expenses: Expense[]; forecasts: Forecast[]; catalogItems: CatalogItem[]; ingredients: CatalogItem[]; costHistory: CostHistory[]; recipes: Recipe[]; recipeItems: RecipeItem[]; imports: ImportRow[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; abcImports: AbcImport[]; abcItems: AbcItem[]; zig: ZigDashboard; products: number; suppliers: number; areas: Area[] };
+type DataState = { sales: Sale[]; saleItems: SaleItem[]; payments: PaymentMethod[]; expenses: Expense[]; forecasts: Forecast[]; catalogItems: CatalogItem[]; ingredients: CatalogItem[]; costHistory: CostHistory[]; recipes: Recipe[]; recipeItems: RecipeItem[]; imports: ImportRow[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; abcImports: AbcImport[]; abcItems: AbcItem[]; zig: ZigDashboard; previousZig: ZigDashboard; products: number; suppliers: number; areas: Area[] };
 
 const EMPTY_ZIG: ZigDashboard = { period_start: "", period_end: "", summary: { gross_cents: 0, discount_cents: 0, net_cents: 0, revenue_cents: 0, quantity: 0, transaction_count: 0, refunded_item_count: 0 }, products: [], payments: [], daily: [], sync: [] };
-const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses: [], forecasts: [], catalogItems: [], ingredients: [], costHistory: [], recipes: [], recipeItems: [], imports: [], profitabilityImports: [], profitabilityItems: [], abcImports: [], abcItems: [], zig: EMPTY_ZIG, products: 0, suppliers: 0, areas: [] };
+const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses: [], forecasts: [], catalogItems: [], ingredients: [], costHistory: [], recipes: [], recipeItems: [], imports: [], profitabilityImports: [], profitabilityItems: [], abcImports: [], abcItems: [], zig: EMPTY_ZIG, previousZig: EMPTY_ZIG, products: 0, suppliers: 0, areas: [] };
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const NUMBER = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const DATE = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
@@ -70,7 +70,9 @@ function nested<T>(value: T | T[] | null | undefined): T | null { return Array.i
 function dateLabel(value: string | null) { return value ? DATE.format(new Date(`${value}T00:00:00Z`)) : "—"; }
 function isoInSaoPaulo(date = new Date()) { const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date); const value = Object.fromEntries(parts.map((part) => [part.type, part.value])); return `${value.year}-${value.month}-${value.day}`; }
 function shiftDate(date: string, days: number) { const value = new Date(`${date}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10); }
-function selectedRange(period: string, customStart: string, customEnd: string): DateRange { const today = isoInSaoPaulo(); const [year, month] = today.split("-").map(Number); if (period === "today") return { start: today, end: today }; if (period === "yesterday") { const yesterday = shiftDate(today, -1); return { start: yesterday, end: yesterday }; } if (period === "7d") return { start: shiftDate(today, -6), end: today }; if (period === "last_month") { const start = new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 10); const end = new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10); return { start, end }; } if (period === "custom") return { start: customStart || today, end: customEnd || customStart || today }; return { start: `${year}-${String(month).padStart(2, "0")}-01`, end: today }; }
+function selectedRange(period: string, customStart: string, customEnd: string): DateRange { const today = isoInSaoPaulo(); const [year, month] = today.split("-").map(Number); if (period === "today") return { start: today, end: today }; if (period === "yesterday") { const yesterday = shiftDate(today, -1); return { start: yesterday, end: yesterday }; } if (period === "this_week") { const weekday = new Date(`${today}T12:00:00Z`).getUTCDay(); return { start: shiftDate(today, -(weekday === 0 ? 6 : weekday - 1)), end: today }; } if (period === "last_month") { const start = new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 10); const end = new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10); return { start, end }; } if (period === "custom") return { start: customStart || today, end: customEnd || customStart || today }; return { start: `${year}-${String(month).padStart(2, "0")}-01`, end: today }; }
+function rangeDays(range: DateRange) { return Math.max(1, Math.round((new Date(`${range.end}T12:00:00Z`).getTime() - new Date(`${range.start}T12:00:00Z`).getTime()) / 86_400_000) + 1); }
+function previousEquivalentRange(range: DateRange): DateRange { const end = shiftDate(range.start, -1); return { start: shiftDate(end, -(rangeDays(range) - 1)), end }; }
 
 type AutomaticCmvRow = { id: string; itemId: string; name: string; sku: string | null; category: string; quantity: number; revenue: number; knownRevenue: number; unitCost: number | null; totalCost: number | null; margin: number | null; cmv: number | null; costStatus: "known" | "partial" | "missing" };
 function automaticCmvRows(data: DataState): AutomaticCmvRow[] {
@@ -94,7 +96,8 @@ function automaticCmvRows(data: DataState): AutomaticCmvRow[] {
 }
 
 async function fetchData(businessId: string, range: DateRange): Promise<DataState> {
-  const [sales, expenses, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig, costHistory, recipes] = await Promise.all([
+  const previousRange = previousEquivalentRange(range);
+  const [sales, expenses, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig, previousZig, costHistory, recipes] = await Promise.all([
     supabase.from("sales").select("id,import_id,period_start,period_end,business_date,gross_amount,discount_amount,product_gross_amount,service_amount,revenue_amount,closing_net_amount,open_accounts_amount,recharge_balance_amount,sales_imports(file_name,row_count,created_at)").eq("business_id", businessId).order("business_date", { ascending: false }),
     supabase.from("expenses").select("id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
     supabase.from("items").select("id,name,sku,item_type,consumption_unit,costing_method,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(name)").eq("business_id", businessId).order("name"),
@@ -105,10 +108,11 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
     supabase.from("zig_profitability_imports").select("id,sale_id,period_start,period_end,source_revenue,known_cost_total,row_count,missing_cost_count,created_at").eq("business_id", businessId).order("period_end", { ascending: false }),
     supabase.from("zig_abc_imports").select("id,file_name,total_value,row_count,missing_cost_count,created_at").eq("business_id", businessId).order("created_at", { ascending: false }),
     supabase.rpc("get_zig_sales_dashboard", { p_business_id: Number(businessId), p_period_start: range.start, p_period_end: range.end }),
+    supabase.rpc("get_zig_sales_dashboard", { p_business_id: Number(businessId), p_period_start: previousRange.start, p_period_end: previousRange.end }),
     supabase.from("item_cost_history").select("id,item_id,unit_cost,effective_from,source,created_at").eq("business_id", businessId).order("effective_from", { ascending: false }),
     supabase.from("recipes").select("id,product_id,yield_quantity,notes,effective_from,created_at").eq("business_id", businessId).order("effective_from", { ascending: false }),
   ]);
-  const firstError = [sales.error, expenses.error, products.error, suppliers.error, areas.error, forecasts.error, imports.error, profitabilityImports.error, abcImports.error, zig.error, costHistory.error, recipes.error].find(Boolean);
+  const firstError = [sales.error, expenses.error, products.error, suppliers.error, areas.error, forecasts.error, imports.error, profitabilityImports.error, abcImports.error, zig.error, previousZig.error, costHistory.error, recipes.error].find(Boolean);
   if (firstError) throw firstError;
   const saleIds = (sales.data ?? []).map((sale) => sale.id);
   const importIds = (sales.data ?? []).map((sale) => sale.import_id).filter(Boolean) as string[];
@@ -127,7 +131,7 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
   const allItems = (products.data ?? []) as unknown as CatalogItem[];
   const catalogItems = allItems.filter((item) => item.item_type === "product");
   const ingredients = allItems.filter((item) => item.item_type !== "product");
-  return { sales: (sales.data ?? []) as unknown as Sale[], saleItems: (items.data ?? []) as unknown as SaleItem[], payments: (payments.data ?? []) as PaymentMethod[], expenses: (expenses.data ?? []) as Expense[], forecasts: (forecasts.data ?? []) as unknown as Forecast[], catalogItems, ingredients, costHistory: (costHistory.data ?? []) as CostHistory[], recipes: (recipes.data ?? []) as Recipe[], recipeItems: (recipeItems.data ?? []) as RecipeItem[], imports: (imports.data ?? []) as ImportRow[], profitabilityImports: (profitabilityImports.data ?? []) as ProfitabilityImport[], profitabilityItems: (profitabilityItems.data ?? []) as ProfitabilityItem[], abcImports: (abcImports.data ?? []) as AbcImport[], abcItems: (abcItems.data ?? []) as AbcItem[], zig: (zig.data as ZigDashboard | null) ?? EMPTY_ZIG, products: catalogItems.length, suppliers: suppliers.count ?? 0, areas: (areas.data ?? []) as Area[] };
+  return { sales: (sales.data ?? []) as unknown as Sale[], saleItems: (items.data ?? []) as unknown as SaleItem[], payments: (payments.data ?? []) as PaymentMethod[], expenses: (expenses.data ?? []) as Expense[], forecasts: (forecasts.data ?? []) as unknown as Forecast[], catalogItems, ingredients, costHistory: (costHistory.data ?? []) as CostHistory[], recipes: (recipes.data ?? []) as Recipe[], recipeItems: (recipeItems.data ?? []) as RecipeItem[], imports: (imports.data ?? []) as ImportRow[], profitabilityImports: (profitabilityImports.data ?? []) as ProfitabilityImport[], profitabilityItems: (profitabilityItems.data ?? []) as ProfitabilityItem[], abcImports: (abcImports.data ?? []) as AbcImport[], abcItems: (abcItems.data ?? []) as AbcItem[], zig: (zig.data as ZigDashboard | null) ?? EMPTY_ZIG, previousZig: (previousZig.data as ZigDashboard | null) ?? EMPTY_ZIG, products: catalogItems.length, suppliers: suppliers.count ?? 0, areas: (areas.data ?? []) as Area[] };
 }
 
 export function DashboardShell() {
@@ -205,7 +209,7 @@ export function DashboardShell() {
       <div className="sidebar-footer"><button className="user-menu" title={profile?.full_name ?? "Usuário"}><span className="user-avatar">{(profile?.full_name ?? "D").charAt(0).toUpperCase()}</span><span className="user-copy"><strong>{profile?.full_name ?? "Usuário"}</strong><small>{membership.role === "owner" ? "Proprietário" : "Gerência"}</small></span></button><button className="logout-button" onClick={signOut} aria-label="Sair"><LogOut size={18} /></button></div>
       <button className="compact-toggle" onClick={() => setSidebarCompact((current) => !current)} aria-label={sidebarCompact ? "Expandir menu" : "Recolher menu"}>{sidebarCompact ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}</button>
     </aside>
-    <main className="workspace"><header className="workspace-header"><div><p className="breadcrumb">Dopamina / {activeNav.label}</p><h1>{activeNav.label}</h1></div><div className="workspace-actions"><label className="search-box"><Search size={17} /><input type="search" placeholder="Buscar no sistema" /><kbd>⌘ K</kbd></label><select className="period-select" value={period} onChange={(event) => { const next = event.target.value; setPeriod(next); refresh(membership.business_id, selectedRange(next, customStart, customEnd)); }} aria-label="Período"><option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="7d">Últimos 7 dias</option><option value="this_month">Este mês</option><option value="last_month">Mês anterior</option><option value="custom">Período personalizado</option></select>{period === "custom" && <div className="custom-period"><input aria-label="Início do período" type="date" value={customStart} max={customEnd} onChange={(event) => { const next = event.target.value; setCustomStart(next); refresh(membership.business_id, selectedRange("custom", next, customEnd)); }} /><span>até</span><input aria-label="Fim do período" type="date" value={customEnd} min={customStart} onChange={(event) => { const next = event.target.value; setCustomEnd(next); refresh(membership.business_id, selectedRange("custom", customStart, next)); }} /></div>}</div></header>
+    <main className="workspace"><header className="workspace-header"><div><p className="breadcrumb">Dopamina / {activeNav.label}</p><h1>{activeNav.label}</h1></div><div className="workspace-actions"><label className="search-box"><Search size={17} /><input type="search" placeholder="Buscar no sistema" /><kbd>⌘ K</kbd></label><select className="period-select" value={period} onChange={(event) => { const next = event.target.value; setPeriod(next); refresh(membership.business_id, selectedRange(next, customStart, customEnd)); }} aria-label="Período"><option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="this_week">Esta semana</option><option value="this_month">Este mês</option><option value="last_month">Mês anterior</option><option value="custom">Período personalizado</option></select>{period === "custom" && <div className="custom-period"><input aria-label="Início do período" type="date" value={customStart} max={customEnd} onChange={(event) => { const next = event.target.value; setCustomStart(next); refresh(membership.business_id, selectedRange("custom", next, customEnd)); }} /><span>até</span><input aria-label="Fim do período" type="date" value={customEnd} min={customStart} onChange={(event) => { const next = event.target.value; setCustomEnd(next); refresh(membership.business_id, selectedRange("custom", customStart, next)); }} /></div>}</div></header>
       <div className="workspace-content"><SectionContent section={section} setSection={setSection} businessId={membership.business_id} userId={userId} data={data} sales={visibleSales} saleItems={visibleItems} expenses={visibleExpenses} profitabilityImports={visibleProfitabilityImports} profitabilityItems={visibleProfitabilityItems} range={range} refreshing={refreshing} onRefresh={() => refresh()} /></div>
     </main>
   </div>;
@@ -231,24 +235,73 @@ function ModuleHero({ eyebrow, title, description, action, icon, onAction }: { e
   return <div className="module-hero"><div className="module-icon">{icon}</div><div><p>{eyebrow}</p><h2>{title}</h2><span>{description}</span></div><button onClick={onAction}>{action}</button></div>;
 }
 
-function Overview({ sales, expenses, data, setSection }: Parameters<typeof SectionContent>[0]) {
-  const apiHasData = data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
-  const revenue = apiHasData ? Number(data.zig.summary.revenue_cents) / 100 : sales.reduce((sum, sale) => sum + Number(sale.revenue_amount ?? sale.gross_amount), 0);
-  const expenseTotal = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
-  const visibleSaleIds = new Set(sales.map((sale) => String(sale.id)));
-  const profitabilityImports = data.profitabilityImports.filter((row) => visibleSaleIds.has(String(row.sale_id)));
-  const automaticRows = automaticCmvRows(data);
-  const knownCost = automaticRows.length ? automaticRows.reduce((sum, row) => sum + Number(row.totalCost ?? 0), 0) : profitabilityImports.reduce((sum, row) => sum + Number(row.known_cost_total), 0);
-  const missingCostCount = automaticRows.length ? automaticRows.filter((row) => row.costStatus === "missing").length : profitabilityImports.reduce((sum, row) => sum + row.missing_cost_count, 0);
-  const result = revenue - expenseTotal - knownCost;
-  const current = sales[0];
-  const configuredSources = data.zig.sync.filter((row) => row.last_success_at).length + (automaticRows.some((row) => row.costStatus === "known") || profitabilityImports.length ? 1 : 0);
-  const health = Math.round(configuredSources / 3 * 100);
-  return <section className="overview-page"><div className="overview-intro"><div><p className="page-kicker">Resumo gerencial</p><h2>Panorama financeiro do Dopamina</h2><span>Indicadores calculados a partir da base única de vendas e despesas.</span></div><button className="accent-button" onClick={() => setSection("vendas")}><FileUp size={17} /> Sincronizar com a Zig</button></div>
-    <div className="metric-grid"><MetricCard label="Receita" value={MONEY.format(revenue)} icon={<TrendingUp size={20} />} tone="green" note={apiHasData ? "API Zig · faturamento recebido" : sales.length ? "Relatório importado" : "Sem vendas no período"} /><MetricCard label="Despesas" value={MONEY.format(expenseTotal)} icon={<ArrowDownRight size={20} />} tone="red" note={`${expenses.length} lançamento(s)`} /><MetricCard label="Resultado conhecido" value={MONEY.format(result)} icon={<ArrowUpRight size={20} />} tone="purple" note={knownCost ? "Receita − despesas − CMV conhecido" : "Cadastre custos para completar"} /><MetricCard label="CMV conhecido" value={MONEY.format(knownCost)} icon={<BarChart3 size={20} />} tone="yellow" note={knownCost ? `${missingCostCount} produto(s) sem custo` : "Sem custos cadastrados"} /></div>
-    <div className="dashboard-grid"><article className="chart-card wide-card"><div className="card-title-row"><div><p>Desempenho</p><h3>Receita x despesas</h3></div><span>{current ? `${dateLabel(current.period_start)} a ${dateLabel(current.period_end)}` : "Sem período"}</span></div><ComparisonBars revenue={revenue} expenses={expenseTotal} /></article><article className="chart-card"><div className="card-title-row"><div><p>Estrutura</p><h3>Base cadastrada</h3></div></div><div className="base-stats"><div><span><PackageSearch size={18} /> Produtos</span><strong>{data.products}</strong></div><div><span><UsersRound size={18} /> Fornecedores</span><strong>{data.suppliers}</strong></div><div><span><Building2 size={18} /> Áreas</span><strong>{data.areas.length}</strong></div></div></article>
-      <article className="chart-card wide-card"><div className="card-title-row"><div><p>Faturamento</p><h3>{apiHasData ? "Composição sincronizada" : "Composição do último fechamento"}</h3></div></div>{apiHasData ? <div className="closing-breakdown"><div><span>Vendas brutas</span><strong>{MONEY.format(Number(data.zig.summary.gross_cents) / 100)}</strong></div><div><span>Recebimentos</span><strong>{MONEY.format(Number(data.zig.summary.revenue_cents) / 100)}</strong></div><div><span>Descontos</span><strong>-{MONEY.format(Number(data.zig.summary.discount_cents) / 100)}</strong></div><div><span>Transações válidas</span><strong>{NUMBER.format(data.zig.summary.transaction_count)}</strong></div></div> : current ? <div className="closing-breakdown"><div><span>Produtos vendidos</span><strong>{MONEY.format(current.product_gross_amount)}</strong></div><div><span>Serviço</span><strong>{MONEY.format(current.service_amount)}</strong></div><div><span>Descontos</span><strong>-{MONEY.format(current.discount_amount)}</strong></div><div><span>Contas em aberto</span><strong>-{MONEY.format(current.open_accounts_amount)}</strong></div></div> : <EmptyMini text="Sincronize a Zig para ver a composição." />}</article>
-      <article className="chart-card"><div className="card-title-row"><div><p>Status</p><h3>Saúde dos dados</h3></div></div><div className="data-health"><div className="health-ring"><strong>{health}%</strong><span>configurado</span></div><p>{configuredSources === 3 ? "Produtos, pagamentos e CMV estão conectados. Complete custos ausentes para fechar a margem." : "O percentual agora reflete fontes realmente sincronizadas, sem valor simulado."}</p></div></article></div></section>;
+type FinancialDay = { date: string; revenue: number; expenses: number; result: number };
+
+function datesInRange(range: DateRange) { return Array.from({ length: rangeDays(range) }, (_, index) => shiftDate(range.start, index)); }
+function expensesInRange(rows: Expense[], range: DateRange) { return rows.filter((row) => row.expense_date >= range.start && row.expense_date <= range.end); }
+function salesInRange(rows: Sale[], range: DateRange) { return rows.filter((row) => row.business_date >= range.start && row.business_date <= range.end); }
+function reportRevenue(rows: Sale[]) { return rows.reduce((sum, row) => sum + Number(row.revenue_amount ?? row.closing_net_amount ?? row.gross_amount), 0); }
+
+function Overview({ sales, expenses, data, setSection, range }: Parameters<typeof SectionContent>[0]) {
+  const [dayOverride, setDayOverride] = useState("");
+  const previousRange = previousEquivalentRange(range);
+  const selectedDay = dayOverride >= range.start && dayOverride <= range.end ? dayOverride : range.end;
+  const zigConnected = data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
+  const previousSales = salesInRange(data.sales, previousRange);
+  const previousExpenses = expensesInRange(data.expenses, previousRange);
+  const revenue = zigConnected ? Number(data.zig.summary.net_cents) / 100 : reportRevenue(sales);
+  const previousRevenue = zigConnected ? Number(data.previousZig.summary.net_cents) / 100 : reportRevenue(previousSales);
+  const expenseTotal = expenses.reduce((sum, row) => sum + Number(row.amount), 0);
+  const previousExpenseTotal = previousExpenses.reduce((sum, row) => sum + Number(row.amount), 0);
+  const result = revenue - expenseTotal;
+  const previousResult = previousRevenue - previousExpenseTotal;
+  const margin = revenue > 0 ? result / revenue : null;
+  const previousMargin = previousRevenue > 0 ? previousResult / previousRevenue : null;
+  const transactionCount = zigConnected ? Number(data.zig.summary.transaction_count) : 0;
+  const previousTransactionCount = zigConnected ? Number(data.previousZig.summary.transaction_count) : 0;
+  const averageTicket = transactionCount > 0 ? revenue / transactionCount : null;
+  const previousAverageTicket = previousTransactionCount > 0 ? previousRevenue / previousTransactionCount : null;
+  const averageDailyCost = expenseTotal / rangeDays(range);
+  const previousAverageDailyCost = previousExpenseTotal / rangeDays(previousRange);
+
+  const revenueByDay = new Map<string, number>();
+  if (zigConnected) data.zig.daily.forEach((row) => revenueByDay.set(row.operational_date, Number(row.net_cents) / 100));
+  else sales.forEach((row) => revenueByDay.set(row.business_date, (revenueByDay.get(row.business_date) ?? 0) + Number(row.revenue_amount ?? row.closing_net_amount ?? row.gross_amount)));
+  const expenseByDay = new Map<string, number>();
+  expenses.forEach((row) => expenseByDay.set(row.expense_date, (expenseByDay.get(row.expense_date) ?? 0) + Number(row.amount)));
+  const daily: FinancialDay[] = datesInRange(range).map((date) => {
+    const dayRevenue = revenueByDay.get(date) ?? 0;
+    const dayExpenses = expenseByDay.get(date) ?? 0;
+    return { date, revenue: dayRevenue, expenses: dayExpenses, result: dayRevenue - dayExpenses };
+  });
+  const day = daily.find((row) => row.date === selectedDay) ?? { date: selectedDay, revenue: 0, expenses: 0, result: 0 };
+  const breakEvenKnown = day.expenses > 0;
+  const breakEvenReached = breakEvenKnown && day.revenue >= day.expenses;
+  const periodLabel = `${dateLabel(range.start)} a ${dateLabel(range.end)}`;
+  const previousLabel = `${dateLabel(previousRange.start)} a ${dateLabel(previousRange.end)}`;
+
+  return <section className="overview-page finance-dashboard">
+    <div className="overview-intro finance-intro"><div><p className="page-kicker">Dashboard financeira</p><h2>Como está o caixa do Dopamina?</h2><span>{periodLabel} · comparação com {previousLabel}</span></div><button className="accent-button" onClick={() => setSection("vendas")}><FileUp size={17} /> Sincronizar com a Zig</button></div>
+    <div className="finance-source-note"><CheckCircle2 size={17} /><span>{zigConnected ? "Faturamento real da Zig" : sales.length ? "Faturamento do relatório importado" : "Nenhum faturamento encontrado"}</span><i /> <span>Despesas reais cadastradas no ERP</span></div>
+
+    <div className="finance-metric-grid">
+      <ExecutiveMetric label="Faturamento" value={MONEY.format(revenue)} previous={previousRevenue} current={revenue} icon={<TrendingUp size={20} />} tone="green" note={zigConnected ? "Vendas líquidas da Zig" : "Fonte disponível no sistema"} />
+      <ExecutiveMetric label="Despesas" value={MONEY.format(expenseTotal)} previous={previousExpenseTotal} current={expenseTotal} icon={<ArrowDownRight size={20} />} tone="red" note={`${expenses.length} lançamento(s), exceto cancelados`} lowerIsBetter />
+      <ExecutiveMetric label="Resultado estimado" value={MONEY.format(result)} previous={previousResult} current={result} icon={result >= 0 ? <ArrowUpRight size={20} /> : <ArrowDownRight size={20} />} tone="purple" note="Faturamento − despesas; sem CMV" />
+      <ExecutiveMetric label="Margem estimada" value={margin === null ? "—" : `${NUMBER.format(margin * 100)}%`} previous={previousMargin} current={margin} icon={<CircleDollarSign size={20} />} tone="yellow" note="Resultado operacional / faturamento" isRatio />
+      <ExecutiveMetric label="Ticket médio" value={averageTicket === null ? "—" : MONEY.format(averageTicket)} previous={previousAverageTicket} current={averageTicket} icon={<ReceiptText size={20} />} tone="green" note={transactionCount ? `${NUMBER.format(transactionCount)} transações válidas` : "A Zig não informou transações"} />
+      <ExecutiveMetric label="Custo médio diário" value={MONEY.format(averageDailyCost)} previous={previousAverageDailyCost} current={averageDailyCost} icon={<CalendarRange size={20} />} tone="red" note={`${rangeDays(range)} dia(s) no período`} lowerIsBetter />
+    </div>
+
+    <div className="finance-main-grid">
+      <article className="chart-card finance-chart-card"><div className="card-title-row"><div><p>Evolução diária</p><h3>Faturamento, despesas e resultado</h3></div><span>{periodLabel}</span></div><FinancialTrendChart rows={daily} /></article>
+      <article className="day-pulse-card"><div className="day-pulse-heading"><div><p>Leitura do dia</p><h3>{dateLabel(selectedDay)}</h3></div><label><span>Escolher dia</span><input type="date" min={range.start} max={range.end} value={selectedDay} onChange={(event) => setDayOverride(event.target.value)} /></label></div>
+        <div className="day-figures"><div><span>Faturou</span><strong>{MONEY.format(day.revenue)}</strong></div><div><span>Custou operar</span><strong>{MONEY.format(day.expenses)}</strong><small>despesas lançadas no dia</small></div><div><span>Sobrou</span><strong className={day.result < 0 ? "negative" : "positive"}>{MONEY.format(day.result)}</strong></div><div><span>Faturamento mínimo</span><strong>{MONEY.format(day.expenses)}</strong><small>para cobrir os custos registrados</small></div></div>
+        <div className={`break-even-status ${!breakEvenKnown ? "unknown" : breakEvenReached ? "reached" : "pending"}`}>{!breakEvenKnown ? <TriangleAlert size={21} /> : breakEvenReached ? <CheckCircle2 size={21} /> : <Clock3 size={21} />}<div><strong>{!breakEvenKnown ? "Ponto de equilíbrio ainda não confiável" : breakEvenReached ? "Ponto de equilíbrio atingido" : "Ponto de equilíbrio ainda não atingido"}</strong><span>{!breakEvenKnown ? "Não há despesas lançadas para este dia. Cadastre os custos para avaliar." : breakEvenReached ? `O faturamento superou os custos registrados em ${MONEY.format(day.revenue - day.expenses)}.` : `Ainda faltam ${MONEY.format(day.expenses - day.revenue)} em faturamento para cobrir os custos.`}</span></div>{!breakEvenKnown && <button type="button" onClick={() => setSection("despesas")}>Cadastrar despesas</button>}</div>
+      </article>
+    </div>
+    <p className="finance-data-note"><TriangleAlert size={15} /> Resultado e margem são operacionais e estimados: consideram faturamento menos despesas cadastradas, sem incluir CMV nesta etapa. Custos não lançados no ERP não aparecem no cálculo.</p>
+  </section>;
 }
 
 function SalesPage(props: Parameters<typeof SectionContent>[0]) {
@@ -542,8 +595,41 @@ function PaymentBars({ payments, sales }: { payments: PaymentMethod[]; sales: Sa
 function CoverageBar({ known, missing }: { known: number; missing: number }) { const total = known + missing; const percentage = total ? known / total * 100 : 0; return <div className="coverage-panel"><div className="coverage-track"><i style={{ width: `${percentage}%` }} /></div><div className="coverage-legend"><span><i className="known-dot" />Com custo <strong>{MONEY.format(known)}</strong></span><span><i className="missing-dot" />Sem custo <strong>{MONEY.format(missing)}</strong></span></div></div>; }
 function AbcSummary({ rows }: { rows: { classification: "A" | "B" | "C"; total_value: number }[] }) { if (!rows.length) return <EmptyMini text="Sem vendas suficientes para calcular a Curva ABC." />; const groups = (["A", "B", "C"] as const).map((classification) => ({ classification, count: rows.filter((row) => row.classification === classification).length, value: rows.filter((row) => row.classification === classification).reduce((sum, row) => sum + Number(row.total_value), 0) })); return <div className="abc-summary">{groups.map((group) => <div key={group.classification}><b className={`abc-class class-${group.classification.toLowerCase()}`}>{group.classification}</b><span>{group.count} item(ns)</span><strong>{MONEY.format(group.value)}</strong></div>)}</div>; }
 function Ranking({ rows }: { rows: { name: string; net: number; quantity: number }[] }) { return rows.length ? <div className="ranking-list">{rows.map((row, index) => <div key={row.name}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{row.name}</strong><small>{NUMBER.format(row.quantity)} unidades</small></div><b>{MONEY.format(row.net)}</b></div>)}</div> : <EmptyMini text="Sem produtos no período." />; }
-function ComparisonBars({ revenue, expenses }: { revenue: number; expenses: number }) { const max = Math.max(revenue, expenses, 1); return <div className="comparison-chart"><div><span>Receita</span><i style={{ height: `${Math.max(revenue / max * 100, 3)}%` }} className="revenue-bar" /><strong>{MONEY.format(revenue)}</strong></div><div><span>Despesas</span><i style={{ height: `${Math.max(expenses / max * 100, 3)}%` }} className="expense-bar" /><strong>{MONEY.format(expenses)}</strong></div></div>; }
 function MiniKpi({ label, value }: { label: string; value: string }) { return <article><span>{label}</span><strong>{value}</strong></article>; }
-function MetricCard({ label, value, icon, tone, note }: { label: string; value: string; icon: React.ReactNode; tone: "green" | "red" | "purple" | "yellow"; note: string }) { return <article className="metric-card"><div className={`metric-icon ${tone}`}>{icon}</div><div><span>{label}</span><strong>{value}</strong></div><small>{note}</small></article>; }
+function ExecutiveMetric({ label, value, icon, tone, note, current, previous, lowerIsBetter = false, isRatio = false }: { label: string; value: string; icon: React.ReactNode; tone: "green" | "red" | "purple" | "yellow"; note: string; current: number | null; previous: number | null; lowerIsBetter?: boolean; isRatio?: boolean }) {
+  let comparison = "Sem comparação";
+  let direction: "up" | "down" | "flat" = "flat";
+  let favorable = true;
+  if (current !== null && previous !== null) {
+    const difference = current - previous;
+    direction = difference > 0 ? "up" : difference < 0 ? "down" : "flat";
+    favorable = lowerIsBetter ? difference <= 0 : difference >= 0;
+    if (isRatio) comparison = difference === 0 ? "Sem mudança" : `${difference > 0 ? "+" : ""}${NUMBER.format(difference * 100)} p.p.`;
+    else if (previous === 0) comparison = current === 0 ? "Sem mudança" : "Novo no período";
+    else comparison = `${difference > 0 ? "+" : ""}${NUMBER.format(difference / Math.abs(previous) * 100)}%`;
+  }
+  return <article className="executive-metric"><div className={`metric-icon ${tone}`}>{icon}</div><div className="executive-metric-copy"><span>{label}</span><strong>{value}</strong><small>{note}</small></div><div className={`metric-comparison ${direction} ${favorable ? "favorable" : "unfavorable"}`}>{direction === "up" ? <ArrowUpRight size={15} /> : direction === "down" ? <ArrowDownRight size={15} /> : null}<span>{comparison}</span><small>vs. período anterior</small></div></article>;
+}
+
+function FinancialTrendChart({ rows }: { rows: FinancialDay[] }) {
+  const width = 880; const height = 280; const left = 68; const right = 18; const top = 20; const bottom = 40;
+  const plotWidth = width - left - right; const plotHeight = height - top - bottom;
+  const values = rows.flatMap((row) => [row.revenue, row.expenses, row.result]);
+  const min = Math.min(0, ...values); const rawMax = Math.max(0, ...values); const max = rawMax === min ? min + 1 : rawMax;
+  const x = (index: number) => left + (rows.length <= 1 ? plotWidth / 2 : index / (rows.length - 1) * plotWidth);
+  const y = (value: number) => top + (max - value) / (max - min) * plotHeight;
+  const points = (key: keyof Pick<FinancialDay, "revenue" | "expenses" | "result">) => rows.map((row, index) => `${x(index)},${y(row[key])}`).join(" ");
+  const grid = Array.from({ length: 5 }, (_, index) => max - (max - min) * index / 4);
+  const labelIndexes = [...new Set(Array.from({ length: Math.min(5, rows.length) }, (_, index) => Math.round(index * (rows.length - 1) / Math.max(1, Math.min(5, rows.length) - 1))))];
+  const compact = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 });
+  return <div className="financial-trend"><div className="finance-chart-legend"><span className="revenue"><i />Faturamento</span><span className="expenses"><i />Despesas</span><span className="result"><i />Resultado</span></div><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby="financial-chart-title financial-chart-description"><title id="financial-chart-title">Evolução financeira diária</title><desc id="financial-chart-description">Linhas de faturamento, despesas e resultado para cada dia do período selecionado.</desc>
+    {grid.map((value) => <g key={value}><line x1={left} x2={width - right} y1={y(value)} y2={y(value)} className="chart-grid-line" /><text x={left - 10} y={y(value) + 4} textAnchor="end" className="chart-axis-label">{compact.format(value)}</text></g>)}
+    {min < 0 && <line x1={left} x2={width - right} y1={y(0)} y2={y(0)} className="chart-zero-line" />}
+    {rows.length > 0 && <><polyline points={points("revenue")} className="trend-line revenue" /><polyline points={points("expenses")} className="trend-line expenses" /><polyline points={points("result")} className="trend-line result" />
+      {rows.length <= 31 && rows.map((row, index) => <g key={row.date}><circle cx={x(index)} cy={y(row.revenue)} r="3.5" className="trend-point revenue"><title>{`${dateLabel(row.date)} · faturamento ${MONEY.format(row.revenue)}`}</title></circle><circle cx={x(index)} cy={y(row.expenses)} r="3.5" className="trend-point expenses"><title>{`${dateLabel(row.date)} · despesas ${MONEY.format(row.expenses)}`}</title></circle><circle cx={x(index)} cy={y(row.result)} r="3.5" className="trend-point result"><title>{`${dateLabel(row.date)} · resultado ${MONEY.format(row.result)}`}</title></circle></g>)}
+    </>}
+    {labelIndexes.map((index) => <text key={rows[index]?.date ?? index} x={x(index)} y={height - 12} textAnchor="middle" className="chart-axis-label">{rows[index] ? dateLabel(rows[index].date).slice(0, 5) : ""}</text>)}
+  </svg></div>;
+}
 function EmptyMini({ text }: { text: string }) { return <div className="empty-mini"><FileSpreadsheet size={24} /><p>{text}</p></div>; }
 function StatusBadge({ status }: { status: Expense["status"] }) { const labels = { completed: "Concluído", pending: "Pendente", draft: "Rascunho", cancelled: "Cancelado" }; return <span className={`status-badge ${status}`}>{labels[status]}</span>; }
