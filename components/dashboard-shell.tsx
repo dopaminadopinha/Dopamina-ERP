@@ -13,6 +13,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { PurchasesPage } from "@/components/purchases-page";
 import { PersonnelPage } from "@/components/personnel-page";
+import { StructuralCostsSection } from "@/components/structural-costs-section";
 import { parseZigReports, type ZigImportPayload } from "@/lib/zig-import";
 import {
   parseZigAbcReport,
@@ -989,6 +990,7 @@ function ExpensesPage(props: Parameters<typeof SectionContent>[0]) {
     await props.onRefresh();
   }
   return <section><ModuleHero eyebrow="Financeiro" title="Despesas" description="Entenda onde o dinheiro é gasto e quanto custa manter o Dopamina funcionando." action="Nova despesa" icon={<ReceiptText size={19} />} onAction={() => setEditing("new")} />
+    <StructuralCostsSection businessId={props.businessId} areas={props.data.areas} onChanged={props.onRefresh} />
     <div className="expense-kpi-grid">
       <ExpenseKpi label="Total de despesas" value={MONEY.format(total)} note={totalChange === null ? "Sem base no período anterior" : `${totalChange > 0 ? "+" : ""}${NUMBER.format(totalChange * 100)}% vs. período anterior`} tone="neutral" />
       <ExpenseKpi label="Despesas pagas" value={MONEY.format(paid)} note={`${confirmed.filter((expense) => expense.status === "completed").length} lançamento(s) pagos`} tone="green" />
