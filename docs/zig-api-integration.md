@@ -19,7 +19,7 @@ O levantamento foi feito antes de qualquer alteração. O ERP possuía dados rea
 | Vendas | Dia operacional | indisponível | evento e data/hora civil | `/erp/saida-produtos` | `transactionDate`, `eventDate`, `eventId` | `zig_sales_transactions` | ambos preservados; filtro usa dia operacional |
 | Vendas | Funcionário/origem | indisponível | atribuição da venda | `/erp/saida-produtos` | `employeeName`, `source` | `zig_sales_transactions` | disponível para evolução futura; documentos pessoais não são salvos |
 | Vendas | Estornos | não explícito | situação do item/transação | `/erp/saida-produtos` | `isRefunded` | transações e itens Zig | excluídos de KPIs e ranking |
-| CMV | custo e margem | CMV XLSX | custos reais | não confirmado | — | tabelas de rentabilidade existentes | fonte ainda não disponível pela API atual |
+| CMV | custo e margem | cadastro central + CMV XLSX | vendas e custo médio/último custo | `/erp/saida-produtos` + cadastro | quantidade e valor líquido | itens Zig + `items` | cálculo automático com cobertura explícita; XLSX permanece como complemento |
 | CMV | Curva ABC de vendas | ABC XLSX incompleto | participação acumulada de vendas | `/erp/saida-produtos` | valores derivados | itens Zig | pode ser calculada; ABC de estoque continua no XLSX |
 | Despesas | lançamentos | manual | contas e pagamentos | não confirmado | — | `expenses` | não disponível na API atual |
 | Estoque | saldo/movimentos | sem dados | estoque, perdas, entradas | não confirmado | — | estrutura existente | fonte ainda não disponível pela API atual |
@@ -47,7 +47,7 @@ Zig API
 - `lib/zig-api/sync.ts`: registra tentativas, continua após falha isolada e executa ingestões atômicas.
 - `app/api/zig/sync/route.ts`: sincronização manual autenticada e execução pelo Cron.
 - `supabase/migrations/*_zig_api_sales_sync.sql`: produtos externos, transações, itens, pagamentos, estado, RLS e RPCs.
-- `components/dashboard-shell.tsx`: filtros reais, sincronização e preferência pela API com planilha como contingência.
+- `components/dashboard-shell.tsx`: filtros reais, sincronização, CMV automático, custos centralizados e planilha como contingência.
 
 ## Segurança e operação
 
@@ -60,4 +60,4 @@ Zig API
 
 ## Validação real pendente
 
-O cenário de 12/08/2026 deve produzir R$ 6.551,79 no faturamento e conter produtos conhecidos como ANTARCTICA BOA LITRÃO, CONTRA FILÉ, FRANGO BACON e CORAÇÃO. Esse teste só pode ser executado depois de cadastrar o token Zig e as chaves server-only na Vercel.
+O cenário de 12/08/2026 deve produzir aproximadamente R$ 6.551,79 no faturamento e conter produtos conhecidos como ANTARCTICA BOA LITRÃO, CONTRA FILÉ, FRANGO BACON e CORAÇÃO. O CMV automático usa custo médio e, na ausência dele, o último custo; produtos sem custo permanecem fora do CMV conhecido e aparecem na cobertura pendente.
