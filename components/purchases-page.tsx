@@ -96,9 +96,9 @@ export function PurchasesPage({ businessId, range, items }: { businessId: string
   }
 
   return <section className="purchase-page">
-    <div className="module-hero"><div className="module-icon"><ShoppingBasket size={20} /></div><div><p>Compras e abastecimento</p><h2>Comprar melhor, receber com controle</h2><span>Pedidos, fornecedores, recebimentos, preços e reposição ligados ao estoque virtual.</span></div><button onClick={() => setPurchaseModal({})}>Nova compra</button></div>
+    <div className="module-hero"><div className="module-icon"><ShoppingBasket size={19} /></div><div><p>Compras e abastecimento</p><h2>Comprar melhor, receber com controle</h2><span>Pedidos, fornecedores, recebimentos, preços e reposição ligados ao estoque virtual.</span></div><button onClick={() => setPurchaseModal({})}>Nova compra</button></div>
     {loading && <p className="purchase-loading"><Clock3 size={15} />Carregando compras e preços reais...</p>}
-    {error && <div className="data-warning"><TriangleAlert size={18} /><div><strong>{error}</strong><span>Nenhum pedido, custo ou saldo foi alterado.</span></div><button onClick={reload}>Tentar novamente</button></div>}
+    {error && <div className="data-warning"><TriangleAlert size={14} /><div><strong>{error}</strong><span>Nenhum pedido, custo ou saldo foi alterado.</span></div><button onClick={reload}>Tentar novamente</button></div>}
     <div className="purchase-kpis">
       <PurchaseKpi label="Comprado no período" value={MONEY.format(Number(dashboard.summary.total))} note={`${dashboard.purchases.filter((row) => row.fulfillment_status !== "cancelled").length} compra(s)`} tone="green" />
       <PurchaseKpi label="Aguardando chegada" value={String(dashboard.summary.awaiting)} note="Pedidos sem recebimento" tone="yellow" />
