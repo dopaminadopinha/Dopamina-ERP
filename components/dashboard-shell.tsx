@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight, ArrowUpRight, BarChart3, Boxes, CalendarRange,
-  CheckCircle2, ChefHat, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, FileSpreadsheet,
+  CheckCircle2, ChefHat, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, FileBarChart2, FileSpreadsheet,
   FileUp, LayoutDashboard, LogOut, Menu, PackageSearch, Pencil,
   Plus, ReceiptText, Search, Settings, ShoppingBasket, ShoppingCart, Trash2, TrendingUp, TriangleAlert,
   UsersRound, WalletCards, X,
@@ -22,7 +22,7 @@ import {
   type ZigProfitabilityPayload,
 } from "@/lib/zig-analytics-import";
 
-type Section = "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" |
+type Section = "visao-geral" | "dre" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" |
   "planejamento" | "cadastros" | "importacoes" | "configuracoes";
 type Membership = { business_id: string; role: "owner" | "manager"; status: "active" | "pending" | "suspended"; businesses: { name: string } | { name: string }[] | null };
 type Profile = { full_name: string; email: string };
@@ -80,6 +80,7 @@ const PRODUCT_SECTORS: { key: ProductSectorKey; label: string }[] = [
 ];
 const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: "visao-geral", label: "Visão geral", icon: <LayoutDashboard size={19} /> },
+  { id: "dre", label: "DRE", icon: <FileBarChart2 size={19} /> },
   { id: "vendas", label: "Vendas", icon: <TrendingUp size={19} /> },
   { id: "cmv", label: "CMV", icon: <BarChart3 size={19} /> },
   { id: "despesas", label: "Despesas", icon: <WalletCards size={19} /> },
@@ -110,9 +111,9 @@ function rangeDays(range: DateRange) { return Math.max(1, Math.round((new Date(`
 function previousEquivalentRange(range: DateRange): DateRange { const end = shiftDate(range.start, -1); return { start: shiftDate(end, -(rangeDays(range) - 1)), end }; }
 
 type AutomaticCmvRow = { id: string; itemId: string; name: string; sku: string | null; category: string; quantity: number; revenue: number; knownRevenue: number; unitCost: number | null; totalCost: number | null; margin: number | null; cmv: number | null; costStatus: "known" | "partial" | "missing" };
-function automaticCmvRows(data: DataState): AutomaticCmvRow[] {
-  const costs = new Map(data.catalogItems.map((item) => [String(item.id), item]));
-  return data.zig.products.map((product) => {
+function automaticCmvRows(zig: ZigDashboard, catalogItems: CatalogItem[]): AutomaticCmvRow[] {
+  const costs = new Map(catalogItems.map((item) => [String(item.id), item]));
+  return zig.products.map((product) => {
     const item = costs.get(String(product.item_id));
     const quantity = Number(product.quantity);
     const revenue = Number(product.net_cents) / 100;
@@ -240,7 +241,7 @@ export function DashboardShell() {
     {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu" />}
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
       <div className="sidebar-brand"><div className="sidebar-logo"><Image src="/dopamina-logo.png" alt="Dopamina" width={54} height={50} unoptimized /></div><button className="close-sidebar-mobile" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X size={20} /></button></div>
-      <nav className="sidebar-nav" aria-label="Navegação principal"><span className="nav-caption">Principal</span>{NAV_ITEMS.slice(0, 9).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}<span className="nav-caption nav-caption-space">Sistema</span>{NAV_ITEMS.slice(9).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}</nav>
+      <nav className="sidebar-nav" aria-label="Navegação principal"><span className="nav-caption">Principal</span>{NAV_ITEMS.slice(0, 10).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}<span className="nav-caption nav-caption-space">Sistema</span>{NAV_ITEMS.slice(10).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}</nav>
       <div className="sidebar-footer"><button className="user-menu" title={profile?.full_name ?? "Usuário"}><span className="user-avatar">{(profile?.full_name ?? "D").charAt(0).toUpperCase()}</span><span className="user-copy"><strong>{profile?.full_name ?? "Usuário"}</strong><small>{membership.role === "owner" ? "Proprietário" : "Gerência"}</small></span></button><button className="logout-button" onClick={signOut} aria-label="Sair"><LogOut size={18} /></button></div>
       <button className="compact-toggle" onClick={() => setSidebarCompact((current) => !current)} aria-label={sidebarCompact ? "Expandir menu" : "Recolher menu"}>{sidebarCompact ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}</button>
     </aside>
@@ -252,6 +253,7 @@ export function DashboardShell() {
 
 function SectionContent(props: { section: Section; setSection: (section: Section) => void; businessId: string; userId: string; data: DataState; sales: Sale[]; saleItems: SaleItem[]; expenses: Expense[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; range: DateRange; refreshing: boolean; onRefresh: () => Promise<void> }) {
   if (props.section === "visao-geral") return <Overview {...props} />;
+  if (props.section === "dre") return <DrePage {...props} />;
   if (props.section === "vendas") return <SalesPage {...props} />;
   if (props.section === "cmv") return <CmvPage {...props} />;
   if (props.section === "despesas") return <ExpensesPage {...props} />;
@@ -263,7 +265,7 @@ function SectionContent(props: { section: Section; setSection: (section: Section
   if (props.section === "planejamento") return <PlanningPage {...props} />;
   if (props.section === "cadastros") return <CatalogPage {...props} />;
   if (props.section === "importacoes") return <ImportsPage {...props} />;
-  const content: Record<Exclude<Section, "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" | "planejamento" | "cadastros" | "importacoes">, { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; columns: string[] }> = {
+  const content: Record<Exclude<Section, "visao-geral" | "dre" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" | "planejamento" | "cadastros" | "importacoes">, { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; columns: string[] }> = {
     configuracoes: { eyebrow: "Administração", title: "Configurações e acessos", description: "Gerencie usuários, dados do negócio e histórico de alterações.", action: "Convidar usuário", icon: <UsersRound size={19} />, columns: ["Usuário", "E-mail", "Perfil", "Status", "Último acesso"] },
   };
   const current = content[props.section];
@@ -342,6 +344,178 @@ function Overview({ sales, expenses, data, setSection, range }: Parameters<typeo
   </section>;
 }
 
+type DreSummary = {
+  grossRevenue: number; discounts: number; netRevenue: number; cmvRevenue: number; cmvKnownRevenue: number;
+  cmv: number; cmvMissingRevenue: number; cmvCoverage: number; grossProfit: number;
+  pessoal: number; pessoalCategories: { category: string; amount: number }[];
+  opex: number; opexCategories: { category: string; amount: number }[];
+  operatingResult: number;
+};
+function computeDreSummary(zig: ZigDashboard, catalogItems: CatalogItem[], allExpenses: Expense[], range: DateRange, apiHasData: boolean, allSales: Sale[]): DreSummary {
+  const salesInPeriod = salesInRange(allSales, range);
+  const grossRevenue = apiHasData ? Number(zig.summary.gross_cents) / 100 : salesInPeriod.reduce((sum, row) => sum + Number(row.gross_amount), 0);
+  const discounts = apiHasData ? Number(zig.summary.discount_cents) / 100 : salesInPeriod.reduce((sum, row) => sum + Number(row.discount_amount), 0);
+  const netRevenue = apiHasData ? Number(zig.summary.revenue_cents) / 100 : reportRevenue(salesInPeriod);
+  const cmvRows = automaticCmvRows(zig, catalogItems);
+  const cmvRevenue = cmvRows.reduce((sum, row) => sum + row.revenue, 0);
+  const cmvKnownRevenue = cmvRows.reduce((sum, row) => sum + row.knownRevenue, 0);
+  const cmv = cmvRows.reduce((sum, row) => sum + Number(row.totalCost ?? 0), 0);
+  const cmvMissingRevenue = Math.max(0, cmvRevenue - cmvKnownRevenue);
+  const cmvCoverage = cmvRevenue > 0 ? cmvKnownRevenue / cmvRevenue : 0;
+  const grossProfit = netRevenue - cmv;
+  const pessoalExpenses = allExpenses.filter((expense) => expense.source_type === "work_shift" || expense.source_type === "personnel_cost");
+  const opexExpenses = allExpenses.filter((expense) => !expense.purchase_id && expense.source_type !== "work_shift" && expense.source_type !== "personnel_cost");
+  const pessoalBreakdown = operationalCostBreakdown(pessoalExpenses, range);
+  const opexBreakdown = operationalCostBreakdown(opexExpenses, range);
+  const pessoal = pessoalBreakdown.days.reduce((sum, row) => sum + row.operational, 0);
+  const opex = opexBreakdown.days.reduce((sum, row) => sum + row.operational, 0);
+  return { grossRevenue, discounts, netRevenue, cmvRevenue, cmvKnownRevenue, cmv, cmvMissingRevenue, cmvCoverage, grossProfit, pessoal, pessoalCategories: pessoalBreakdown.categories, opex, opexCategories: opexBreakdown.categories, operatingResult: grossProfit - pessoal - opex };
+}
+function pctChange(current: number | null, previous: number | null) { if (current === null || previous === null || previous === 0) return null; return (current - previous) / Math.abs(previous); }
+
+function DrePage(props: Parameters<typeof SectionContent>[0]) {
+  const range = props.range;
+  const previousRange = previousEquivalentRange(range);
+  const apiHasData = props.data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
+  const current = useMemo(() => computeDreSummary(props.data.zig, props.data.catalogItems, props.data.expenses, range, apiHasData, props.data.sales), [props.data.zig, props.data.catalogItems, props.data.expenses, range, apiHasData, props.data.sales]);
+  const previous = useMemo(() => computeDreSummary(props.data.previousZig, props.data.catalogItems, props.data.expenses, previousRange, apiHasData, props.data.sales), [props.data.previousZig, props.data.catalogItems, props.data.expenses, previousRange, apiHasData, props.data.sales]);
+
+  const grossMargin = current.netRevenue > 0 ? current.grossProfit / current.netRevenue : null;
+  const previousGrossMargin = previous.netRevenue > 0 ? previous.grossProfit / previous.netRevenue : null;
+  const operatingMargin = current.netRevenue > 0 ? current.operatingResult / current.netRevenue : null;
+  const previousOperatingMargin = previous.netRevenue > 0 ? previous.operatingResult / previous.netRevenue : null;
+  const cmvPct = current.netRevenue > 0 ? current.cmv / current.netRevenue : null;
+  const previousCmvPct = previous.netRevenue > 0 ? previous.cmv / previous.netRevenue : null;
+  const pessoalPct = current.netRevenue > 0 ? current.pessoal / current.netRevenue : null;
+  const opexPct = current.netRevenue > 0 ? current.opex / current.netRevenue : null;
+
+  const revenueChange = pctChange(current.netRevenue, previous.netRevenue);
+  const resultChange = pctChange(current.operatingResult, previous.operatingResult);
+  const pessoalChange = pctChange(current.pessoal, previous.pessoal);
+
+  const sectorResults = useMemo(() => {
+    const sourceProducts = props.data.sectorProfitability.products;
+    const totalRevenue = sourceProducts.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
+    return SECTOR_NAMES.map((name) => {
+      const products = sourceProducts.filter((product) => product.sector === name);
+      const revenue = products.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
+      const knownRevenue = products.reduce((sum, product) => sum + Number(product.known_revenue_cents) / 100, 0);
+      const cmv = products.reduce((sum, product) => sum + Number(product.known_cmv ?? 0), 0);
+      const grossProfit = knownRevenue - cmv;
+      const sectorExpenses = props.data.expenses.filter((expense) => sectorNameForSource(nested(expense.areas)?.name) === name);
+      const pessoal = sectorExpenses.filter((expense) => expense.source_type === "work_shift" || expense.source_type === "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
+      const opex = sectorExpenses.filter((expense) => expense.source_type !== "work_shift" && expense.source_type !== "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
+      const result = grossProfit - pessoal - opex;
+      return { name, revenue, share: totalRevenue > 0 ? revenue / totalRevenue : 0, knownRevenue, cmv, grossProfit, pessoal, opex, result, margin: knownRevenue > 0 ? result / knownRevenue : null };
+    });
+  }, [props.data.sectorProfitability, props.data.expenses, range]);
+  const sectorTotal = sectorResults.reduce((sum, row) => sum + row.result, 0);
+  const generalExpenses = props.data.expenses.filter((expense) => sectorNameForSource(nested(expense.areas)?.name) === null && !expense.purchase_id);
+  const generalPessoal = generalExpenses.filter((expense) => expense.source_type === "work_shift" || expense.source_type === "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
+  const generalOpex = generalExpenses.filter((expense) => expense.source_type !== "work_shift" && expense.source_type !== "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
+  const generalTotal = generalPessoal + generalOpex;
+  const finalResult = sectorTotal - generalTotal;
+
+  const dailyRevenue = new Map<string, number>();
+  if (apiHasData) props.data.zig.daily.forEach((row) => dailyRevenue.set(row.operational_date, Number(row.net_cents) / 100));
+  else salesInRange(props.data.sales, range).forEach((row) => dailyRevenue.set(row.business_date, (dailyRevenue.get(row.business_date) ?? 0) + Number(row.revenue_amount ?? row.closing_net_amount ?? row.gross_amount)));
+  const pessoalByDay = new Map(operationalCostBreakdown(props.data.expenses.filter((expense) => expense.source_type === "work_shift" || expense.source_type === "personnel_cost"), range).days.map((row) => [row.date, row.operational]));
+  const opexByDay = new Map(operationalCostBreakdown(props.data.expenses.filter((expense) => !expense.purchase_id && expense.source_type !== "work_shift" && expense.source_type !== "personnel_cost"), range).days.map((row) => [row.date, row.operational]));
+  const dailyTrend: FinancialDay[] = datesInRange(range).map((date) => {
+    const revenue = dailyRevenue.get(date) ?? 0;
+    const expenses = (pessoalByDay.get(date) ?? 0) + (opexByDay.get(date) ?? 0);
+    return { date, revenue, expenses, result: revenue - expenses };
+  });
+
+  const alerts: { label: string; detail: string; tone: "red" | "yellow" }[] = [];
+  if (current.operatingResult < 0) alerts.push({ label: "Resultado operacional negativo", detail: `O período fechou em ${MONEY.format(current.operatingResult)} depois de CMV, pessoal e despesas operacionais.`, tone: "red" });
+  if (cmvPct !== null && previousCmvPct !== null && cmvPct - previousCmvPct > 0.02) alerts.push({ label: "CMV aumentou em relação ao período anterior", detail: `Foi de ${NUMBER.format(previousCmvPct * 100)}% para ${NUMBER.format(cmvPct * 100)}% da receita líquida.`, tone: "yellow" });
+  if (pessoalChange !== null && revenueChange !== null && pessoalChange > revenueChange + 0.02) alerts.push({ label: "Custo de pessoal cresceu mais que o faturamento", detail: `Pessoal ${pessoalChange >= 0 ? "subiu" : "caiu"} ${NUMBER.format(Math.abs(pessoalChange) * 100)}% contra ${NUMBER.format(Math.abs(revenueChange) * 100)}% do faturamento.`, tone: "yellow" });
+  if (operatingMargin !== null && previousOperatingMargin !== null && operatingMargin < previousOperatingMargin - 0.01) alerts.push({ label: "Margem operacional caiu", detail: `Foi de ${NUMBER.format(previousOperatingMargin * 100)}% para ${NUMBER.format(operatingMargin * 100)}% da receita líquida.`, tone: "yellow" });
+  if (revenueChange !== null && revenueChange > 0.01 && resultChange !== null && resultChange < 0) alerts.push({ label: "Faturamento cresceu, mas o resultado caiu", detail: `Receita líquida subiu ${NUMBER.format(revenueChange * 100)}%, mas o resultado operacional caiu ${NUMBER.format(Math.abs(resultChange) * 100)}%.`, tone: "yellow" });
+  current.opexCategories.forEach((row) => { const prior = previous.opexCategories.find((item) => item.category === row.category); const change = pctChange(row.amount, prior?.amount ?? null); if (change !== null && change > 0.25 && row.amount - Number(prior?.amount ?? 0) > 50) alerts.push({ label: `${row.category} aumentou significativamente`, detail: `De ${MONEY.format(Number(prior?.amount ?? 0))} para ${MONEY.format(row.amount)} no período.`, tone: "yellow" }); });
+  sectorResults.filter((row) => row.revenue > 0 && row.result < 0).forEach((row) => alerts.push({ label: `${row.name} com resultado negativo`, detail: `${MONEY.format(row.revenue)} de faturamento, mas resultado conhecido de ${MONEY.format(row.result)}.`, tone: "red" }));
+
+  const periodLabel = `${dateLabel(range.start)} a ${dateLabel(range.end)}`;
+  const previousLabel = `${dateLabel(previousRange.start)} a ${dateLabel(previousRange.end)}`;
+
+  return <section className="dre-page">
+    <ModuleHero eyebrow="Resultado real" title="DRE gerencial" description="Receita, CMV, pessoal e despesas já sincronizados, reunidos para responder quanto o bar realmente ganhou ou perdeu." action="Revisar CMV" icon={<FileBarChart2 size={19} />} onAction={() => props.setSection("cmv")} />
+    <p className="dre-source-note"><CheckCircle2 size={15} />{periodLabel} · comparação com {previousLabel} · {apiHasData ? "Faturamento real da Zig" : "Relatório importado"}</p>
+
+    <div className="finance-metric-grid dre-kpi-grid">
+      <ExecutiveMetric label="Receita líquida" value={MONEY.format(current.netRevenue)} current={current.netRevenue} previous={previous.netRevenue} icon={<TrendingUp size={20} />} tone="green" note="Faturamento após descontos" />
+      <ExecutiveMetric label="Lucro bruto" value={MONEY.format(current.grossProfit)} current={current.grossProfit} previous={previous.grossProfit} icon={<ArrowUpRight size={20} />} tone="green" note="Receita líquida − CMV" />
+      <ExecutiveMetric label="Margem bruta" value={grossMargin === null ? "—" : `${NUMBER.format(grossMargin * 100)}%`} current={grossMargin} previous={previousGrossMargin} isRatio icon={<CircleDollarSign size={20} />} tone="purple" note="Lucro bruto / receita líquida" />
+      <ExecutiveMetric label="CMV" value={MONEY.format(current.cmv)} current={current.cmv} previous={previous.cmv} lowerIsBetter icon={<BarChart3 size={20} />} tone="yellow" note={`${NUMBER.format(current.cmvCoverage * 100)}% da receita com custo conhecido`} />
+      <ExecutiveMetric label="Custo de pessoal" value={MONEY.format(current.pessoal)} current={current.pessoal} previous={previous.pessoal} lowerIsBetter icon={<UsersRound size={20} />} tone="red" note={pessoalPct === null ? "Sem receita no período" : `${NUMBER.format(pessoalPct * 100)}% da receita líquida`} />
+      <ExecutiveMetric label="Despesas operacionais" value={MONEY.format(current.opex)} current={current.opex} previous={previous.opex} lowerIsBetter icon={<WalletCards size={20} />} tone="red" note={opexPct === null ? "Sem receita no período" : `${NUMBER.format(opexPct * 100)}% da receita líquida`} />
+      <ExecutiveMetric label="Resultado operacional" value={MONEY.format(current.operatingResult)} current={current.operatingResult} previous={previous.operatingResult} icon={current.operatingResult >= 0 ? <ArrowUpRight size={20} /> : <ArrowDownRight size={20} />} tone="purple" note="Lucro bruto − pessoal − despesas" />
+      <ExecutiveMetric label="Margem operacional" value={operatingMargin === null ? "—" : `${NUMBER.format(operatingMargin * 100)}%`} current={operatingMargin} previous={previousOperatingMargin} isRatio icon={<FileBarChart2 size={20} />} tone="purple" note="Resultado operacional / receita líquida" />
+    </div>
+
+    {current.cmvMissingRevenue > 0 && <div className="data-warning"><TriangleAlert size={14} /><span><strong>{MONEY.format(current.cmvMissingRevenue)}</strong> da receita ainda não tem CMV confiável ({NUMBER.format(current.cmvCoverage * 100)}% de cobertura) — o resultado acima é o resultado conhecido, não uma estimativa completa.</span></div>}
+
+    <div className="dre-layout">
+      <article className="chart-card dre-statement-card"><div className="card-title-row"><div><p>Demonstrativo</p><h3>Da receita ao resultado</h3></div></div>
+        <div className="dre-statement">
+          <DreLine label="Receita bruta" value={current.grossRevenue} />
+          <DreLine label="(-) Descontos e deduções" value={-current.discounts} muted />
+          <DreLine label="= Receita líquida" value={current.netRevenue} strong />
+          <DreLine label="(-) CMV" value={-current.cmv} muted percent={cmvPct} />
+          <DreLine label="= Lucro bruto" value={current.grossProfit} strong percent={grossMargin} />
+          <DreLine label="(-) Custos de pessoal" value={-current.pessoal} muted percent={pessoalPct} />
+          <DreLine label="(-) Despesas operacionais" value={-current.opex} muted percent={opexPct} />
+          <DreLine label="= Resultado operacional" value={current.operatingResult} strong final percent={operatingMargin} />
+        </div>
+      </article>
+      <article className="chart-card"><div className="card-title-row"><div><p>Cobertura</p><h3>Receita com CMV conhecido</h3></div><strong>{NUMBER.format(current.cmvCoverage * 100)}%</strong></div><CoverageBar known={current.cmvKnownRevenue} missing={current.cmvMissingRevenue} /></article>
+    </div>
+
+    <div className="dre-layout">
+      <article className="chart-card finance-chart-card"><div className="card-title-row"><div><p>Evolução diária</p><h3>Faturamento, despesas e resultado</h3></div><span>{periodLabel}</span></div><FinancialTrendChart rows={dailyTrend} /><p className="dre-chart-note">Despesas somam pessoal e operacionais rateadas por dia; o CMV entra apenas no total do período, pois não há custo diário confiável por produto.</p></article>
+      <article className="chart-card"><div className="card-title-row"><div><p>Comparação</p><h3>{periodLabel} vs. {previousLabel}</h3></div></div>
+        <div className="dre-compare-grid">
+          <DreCompareRow label="Receita líquida" current={current.netRevenue} previous={previous.netRevenue} money />
+          <DreCompareRow label="Resultado operacional" current={current.operatingResult} previous={previous.operatingResult} money />
+          <DreCompareRow label="Margem operacional" current={operatingMargin} previous={previousOperatingMargin} />
+        </div>
+      </article>
+    </div>
+
+    <div className="dre-layout">
+      <article className="chart-card"><div className="card-title-row"><div><p>Composição</p><h3>O que mais consome a receita</h3></div></div>
+        <div className="expense-classification dre-composition"><ExpenseCompositionRow label="CMV" value={current.cmv} total={current.netRevenue} /><ExpenseCompositionRow label="Pessoal" value={current.pessoal} total={current.netRevenue} /><ExpenseCompositionRow label="Despesas operacionais" value={current.opex} total={current.netRevenue} /><ExpenseCompositionRow label="Resultado operacional" value={Math.max(0, current.operatingResult)} total={current.netRevenue} /></div>
+      </article>
+      <article className="chart-card"><div className="card-title-row"><div><p>Detalhamento</p><h3>Despesas operacionais por categoria</h3></div></div><ExpenseCategoryBars rows={current.opexCategories} total={current.opex} /></article>
+    </div>
+
+    <article className="chart-card dre-sector-card">
+      <div className="card-title-row"><div><p>Resultado por setor</p><h3>Bar, Drinks, Cozinha e Churrasqueira</h3></div><span>Custos gerais não são rateados entre setores</span></div>
+      <div className="data-table-card dre-sector-table-card"><div className="responsive-table dre-sector-table"><div className="table-row table-header"><span>Setor</span><span>Receita</span><span>CMV</span><span>Lucro bruto</span><span>Pessoal</span><span>Despesas</span><span>Resultado</span><span>Margem</span></div>
+        {sectorResults.map((row) => <div className="table-row" key={row.name}><strong>{row.name}</strong><span>{row.revenue > 0 ? MONEY.format(row.revenue) : "—"}</span><span>{row.knownRevenue > 0 ? MONEY.format(row.cmv) : "—"}</span><span>{row.knownRevenue > 0 ? MONEY.format(row.grossProfit) : "—"}</span><span>{row.pessoal > 0 ? MONEY.format(row.pessoal) : "—"}</span><span>{row.opex > 0 ? MONEY.format(row.opex) : "—"}</span><strong className={row.result < 0 ? "negative" : ""}>{row.knownRevenue > 0 ? MONEY.format(row.result) : "—"}</strong><span>{row.margin === null ? "—" : `${NUMBER.format(row.margin * 100)}%`}</span></div>)}
+      </div></div>
+      <div className="dre-sector-summary">
+        <div><span>Resultado dos setores antes dos custos gerais</span><strong>{MONEY.format(sectorTotal)}</strong></div>
+        <div><span>Custos gerais (terreno, banheiros, geral)</span><strong>{generalTotal > 0 ? `- ${MONEY.format(generalTotal)}` : "—"}</strong></div>
+        <div className="final"><span>Resultado final do negócio</span><strong className={finalResult < 0 ? "negative" : ""}>{MONEY.format(finalResult)}</strong></div>
+      </div>
+    </article>
+
+    <article className="chart-card dre-alerts-card"><div className="card-title-row"><div><p>Alertas gerenciais</p><h3>O que merece atenção</h3></div><TriangleAlert size={19} /></div>
+      {alerts.length ? <div className="product-alert-list">{alerts.map((alert, index) => <div key={`${alert.label}-${index}`}><span className={`product-alert-dot priority-${alert.tone === "red" ? 0 : 1}`} /><div><strong>{alert.label}</strong><small>{alert.detail}</small></div></div>)}</div> : <EmptyMini text="Nenhum alerta relevante identificado com os dados atuais." />}
+    </article>
+  </section>;
+}
+function DreLine({ label, value, muted, strong, final, percent }: { label: string; value: number; muted?: boolean; strong?: boolean; final?: boolean; percent?: number | null }) {
+  return <div className={`dre-line ${strong ? "strong" : ""} ${final ? "final" : ""} ${muted ? "muted" : ""} ${value < 0 ? "negative" : ""}`}><span>{label}</span><strong>{MONEY.format(value)}</strong><small>{percent === null || percent === undefined ? "" : `${NUMBER.format(percent * 100)}%`}</small></div>;
+}
+function DreCompareRow({ label, current, previous, money }: { label: string; current: number | null; previous: number | null; money?: boolean }) {
+  const format = (value: number | null) => value === null ? "—" : money ? MONEY.format(value) : `${NUMBER.format(value * 100)}%`;
+  const change = pctChange(current, previous);
+  return <div className="dre-compare-row"><span>{label}</span><div><small>Atual</small><strong>{format(current)}</strong></div><div><small>Anterior</small><strong>{format(previous)}</strong></div><div className={change === null ? "" : change >= 0 ? "positive" : "negative"}><small>Variação</small><strong>{change === null ? "—" : `${change > 0 ? "+" : ""}${NUMBER.format(change * 100)}%`}</strong></div></div>;
+}
+
 function SalesPage(props: Parameters<typeof SectionContent>[0]) {
   const [showImport, setShowImport] = useState(false);
   const [query, setQuery] = useState("");
@@ -410,7 +584,7 @@ function SalesPage(props: Parameters<typeof SectionContent>[0]) {
 function CmvPage(props: Parameters<typeof SectionContent>[0]) {
   const [showImport, setShowImport] = useState(false);
   const [query, setQuery] = useState("");
-  const automaticRows = automaticCmvRows(props.data);
+  const automaticRows = automaticCmvRows(props.data.zig, props.data.catalogItems);
   const sourceRows: AutomaticCmvRow[] = automaticRows.length ? automaticRows : props.profitabilityItems.map((row) => ({ id: `report-${row.id}`, itemId: "", name: row.source_product_name, sku: row.source_sku, category: row.source_category ?? "Sem categoria", quantity: Number(row.quantity), revenue: Number(row.gross_amount), knownRevenue: row.cost_status === "known" ? Number(row.gross_amount) : 0, unitCost: row.unit_cost === null ? null : Number(row.unit_cost), totalCost: row.total_cost === null ? null : Number(row.total_cost), margin: row.cost_status === "known" ? Number(row.margin_percentage) : null, cmv: row.cost_status === "known" ? Number(row.cmv_percentage) : null, costStatus: row.cost_status }));
   const rows = sourceRows.filter((row) => `${row.name} ${row.sku ?? ""} ${row.category}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => b.revenue - a.revenue);
   const gross = sourceRows.reduce((sum, row) => sum + row.revenue, 0);
@@ -449,7 +623,7 @@ function sectorNameForSource(value: string | null | undefined): SectorName | nul
 
 function operationalExpenseAmount(expense: Expense, range: DateRange) {
   const amount = Number(expense.amount);
-  if (!Number.isFinite(amount) || amount <= 0 || (expense.status !== "pending" && expense.status !== "completed")) return 0;
+  if (!Number.isFinite(amount) || amount <= 0 || !!expense.purchase_id || (expense.status !== "pending" && expense.status !== "completed")) return 0;
   if (!expense.is_recurring) return expense.expense_date >= range.start && expense.expense_date <= range.end ? amount : 0;
   const effectiveEnd = expense.recurrence_end && expense.recurrence_end < range.end ? expense.recurrence_end : range.end;
   let cursor = new Date(`${expense.expense_date.slice(0, 7)}-01T12:00:00Z`);
@@ -915,7 +1089,7 @@ function operationalCostBreakdown(expenses: Expense[], range: DateRange) {
   const days = datesInRange(range).map((date) => ({ date, booked: 0, operational: 0 }));
   const daily = new Map(days.map((row) => [row.date, row]));
   const categories = new Map<string, number>();
-  expenses.filter((expense) => expense.status === "pending" || expense.status === "completed").forEach((expense) => {
+  expenses.filter((expense) => !expense.purchase_id && (expense.status === "pending" || expense.status === "completed")).forEach((expense) => {
     const amount = Number(expense.amount);
     if (!Number.isFinite(amount) || amount <= 0) return;
     if (expense.expense_date >= range.start && expense.expense_date <= range.end) {
