@@ -4,7 +4,7 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowDownRight, ArrowUpRight, BarChart3, Boxes, Building2, CalendarRange,
+  ArrowDownRight, ArrowUpRight, BarChart3, Boxes, CalendarRange,
   CheckCircle2, ChefHat, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, FileSpreadsheet,
   FileUp, LayoutDashboard, LogOut, Menu, PackageSearch, Pencil,
   Plus, ReceiptText, Search, Settings, ShoppingCart, Trash2, TrendingUp, TriangleAlert,
@@ -138,9 +138,7 @@ export function DashboardShell() {
   const router = useRouter();
   const [section, setSection] = useState<Section>("visao-geral");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sidebarCompact, setSidebarCompact] = useState(false);
-
-  useEffect(() => { setSidebarCompact(localStorage.getItem("dopamina-sidebar-compact") === "1"); }, []);
+  const [sidebarCompact, setSidebarCompact] = useState(() => typeof window !== "undefined" && localStorage.getItem("dopamina-sidebar-compact") === "1");
   useEffect(() => { localStorage.setItem("dopamina-sidebar-compact", sidebarCompact ? "1" : "0"); }, [sidebarCompact]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
