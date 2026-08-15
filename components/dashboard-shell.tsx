@@ -19,7 +19,7 @@ import {
   type ZigProfitabilityPayload,
 } from "@/lib/zig-analytics-import";
 
-type Section = "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "estoque" |
+type Section = "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" |
   "planejamento" | "cadastros" | "importacoes" | "configuracoes";
 type Membership = { business_id: string; role: "owner" | "manager"; status: "active" | "pending" | "suspended"; businesses: { name: string } | { name: string }[] | null };
 type Profile = { full_name: string; email: string };
@@ -50,12 +50,16 @@ type ZigDashboard = {
 };
 type SectorProduct = { sector: "Bar" | "Drinks" | "Cozinha" | "Churrasqueira" | null; source_area: string; item_id: string | null; name: string; sku: string | null; category: string | null; quantity: number; revenue_cents: number; costed_quantity: number; missing_cost_quantity: number; known_revenue_cents: number; known_cmv: number | null };
 type SectorProfitability = { period_start: string; period_end: string; products: SectorProduct[] };
+type ProductCostStatus = "known" | "partial" | "missing";
+type ProductPerformance = "star" | "attention" | "opportunity" | "low" | "unknown";
+type ProductSort = "profit_desc" | "quantity_desc" | "revenue_desc" | "margin_desc" | "margin_asc" | "cmv_desc" | "high_sales_low_profit" | "low_sales_high_margin";
+type ProductProfitabilityRow = { key: string; itemId: string | null; name: string; sku: string | null; category: string; sector: string; quantity: number; revenue: number; share: number; costedQuantity: number; missingQuantity: number; costStatus: ProductCostStatus; unitCost: number | null; knownCmv: number; cmv: number | null; profit: number | null; unitProfit: number | null; margin: number | null; averagePrice: number | null; costChange: number | null; performance: ProductPerformance };
 type DateRange = { start: string; end: string };
-type DataState = { sales: Sale[]; saleItems: SaleItem[]; payments: PaymentMethod[]; expenses: Expense[]; forecasts: Forecast[]; catalogItems: CatalogItem[]; ingredients: CatalogItem[]; costHistory: CostHistory[]; recipes: Recipe[]; recipeItems: RecipeItem[]; imports: ImportRow[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; abcImports: AbcImport[]; abcItems: AbcItem[]; zig: ZigDashboard; previousZig: ZigDashboard; sectorProfitability: SectorProfitability; products: number; suppliers: number; areas: Area[] };
+type DataState = { sales: Sale[]; saleItems: SaleItem[]; payments: PaymentMethod[]; expenses: Expense[]; forecasts: Forecast[]; catalogItems: CatalogItem[]; ingredients: CatalogItem[]; costHistory: CostHistory[]; recipes: Recipe[]; recipeItems: RecipeItem[]; imports: ImportRow[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; abcImports: AbcImport[]; abcItems: AbcItem[]; zig: ZigDashboard; previousZig: ZigDashboard; sectorProfitability: SectorProfitability; previousSectorProfitability: SectorProfitability; products: number; suppliers: number; areas: Area[] };
 
 const EMPTY_ZIG: ZigDashboard = { period_start: "", period_end: "", summary: { gross_cents: 0, discount_cents: 0, net_cents: 0, revenue_cents: 0, quantity: 0, transaction_count: 0, refunded_item_count: 0 }, products: [], payments: [], daily: [], sync: [] };
 const EMPTY_SECTOR_PROFITABILITY: SectorProfitability = { period_start: "", period_end: "", products: [] };
-const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses: [], forecasts: [], catalogItems: [], ingredients: [], costHistory: [], recipes: [], recipeItems: [], imports: [], profitabilityImports: [], profitabilityItems: [], abcImports: [], abcItems: [], zig: EMPTY_ZIG, previousZig: EMPTY_ZIG, sectorProfitability: EMPTY_SECTOR_PROFITABILITY, products: 0, suppliers: 0, areas: [] };
+const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses: [], forecasts: [], catalogItems: [], ingredients: [], costHistory: [], recipes: [], recipeItems: [], imports: [], profitabilityImports: [], profitabilityItems: [], abcImports: [], abcItems: [], zig: EMPTY_ZIG, previousZig: EMPTY_ZIG, sectorProfitability: EMPTY_SECTOR_PROFITABILITY, previousSectorProfitability: EMPTY_SECTOR_PROFITABILITY, products: 0, suppliers: 0, areas: [] };
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const NUMBER = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const DATE = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
@@ -71,6 +75,7 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: "cmv", label: "CMV", icon: <BarChart3 size={19} /> },
   { id: "despesas", label: "Despesas", icon: <WalletCards size={19} /> },
   { id: "setores", label: "Setores", icon: <CircleDollarSign size={19} /> },
+  { id: "produtos", label: "Produtos", icon: <PackageSearch size={19} /> },
   { id: "estoque", label: "Estoque", icon: <Boxes size={19} /> },
   { id: "planejamento", label: "Planejamento", icon: <CalendarRange size={19} /> },
   { id: "cadastros", label: "Cadastros", icon: <ClipboardList size={19} /> },
@@ -116,7 +121,7 @@ function automaticCmvRows(data: DataState): AutomaticCmvRow[] {
 
 async function fetchData(businessId: string, range: DateRange): Promise<DataState> {
   const previousRange = previousEquivalentRange(range);
-  const [sales, expenses, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig, previousZig, sectorProfitability, costHistory, recipes] = await Promise.all([
+  const [sales, expenses, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig, previousZig, sectorProfitability, previousSectorProfitability, costHistory, recipes] = await Promise.all([
     supabase.from("sales").select("id,import_id,period_start,period_end,business_date,gross_amount,discount_amount,product_gross_amount,service_amount,revenue_amount,closing_net_amount,open_accounts_amount,recharge_balance_amount,sales_imports(file_name,row_count,created_at)").eq("business_id", businessId).order("business_date", { ascending: false }),
     supabase.from("expenses").select("id,area_id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring,cost_behavior,areas(name)").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
     supabase.from("items").select("id,area_id,name,sku,item_type,consumption_unit,costing_method,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(id,name)").eq("business_id", businessId).order("name"),
@@ -129,10 +134,11 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
     supabase.rpc("get_zig_sales_dashboard", { p_business_id: Number(businessId), p_period_start: range.start, p_period_end: range.end }),
     supabase.rpc("get_zig_sales_dashboard", { p_business_id: Number(businessId), p_period_start: previousRange.start, p_period_end: previousRange.end }),
     supabase.rpc("get_sector_profitability", { p_business_id: Number(businessId), p_period_start: range.start, p_period_end: range.end }),
+    supabase.rpc("get_sector_profitability", { p_business_id: Number(businessId), p_period_start: previousRange.start, p_period_end: previousRange.end }),
     supabase.from("item_cost_history").select("id,item_id,unit_cost,effective_from,source,created_at").eq("business_id", businessId).order("effective_from", { ascending: false }),
     supabase.from("recipes").select("id,product_id,yield_quantity,notes,effective_from,created_at").eq("business_id", businessId).order("effective_from", { ascending: false }),
   ]);
-  const firstError = [sales.error, expenses.error, products.error, suppliers.error, areas.error, forecasts.error, imports.error, profitabilityImports.error, abcImports.error, zig.error, previousZig.error, sectorProfitability.error, costHistory.error, recipes.error].find(Boolean);
+  const firstError = [sales.error, expenses.error, products.error, suppliers.error, areas.error, forecasts.error, imports.error, profitabilityImports.error, abcImports.error, zig.error, previousZig.error, sectorProfitability.error, previousSectorProfitability.error, costHistory.error, recipes.error].find(Boolean);
   if (firstError) throw firstError;
   const saleIds = (sales.data ?? []).map((sale) => sale.id);
   const importIds = (sales.data ?? []).map((sale) => sale.import_id).filter(Boolean) as string[];
@@ -151,7 +157,7 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
   const allItems = (products.data ?? []) as unknown as CatalogItem[];
   const catalogItems = allItems.filter((item) => item.item_type === "product");
   const ingredients = allItems.filter((item) => item.item_type !== "product");
-  return { sales: (sales.data ?? []) as unknown as Sale[], saleItems: (items.data ?? []) as unknown as SaleItem[], payments: (payments.data ?? []) as PaymentMethod[], expenses: (expenses.data ?? []) as Expense[], forecasts: (forecasts.data ?? []) as unknown as Forecast[], catalogItems, ingredients, costHistory: (costHistory.data ?? []) as CostHistory[], recipes: (recipes.data ?? []) as Recipe[], recipeItems: (recipeItems.data ?? []) as RecipeItem[], imports: (imports.data ?? []) as ImportRow[], profitabilityImports: (profitabilityImports.data ?? []) as ProfitabilityImport[], profitabilityItems: (profitabilityItems.data ?? []) as ProfitabilityItem[], abcImports: (abcImports.data ?? []) as AbcImport[], abcItems: (abcItems.data ?? []) as AbcItem[], zig: (zig.data as ZigDashboard | null) ?? EMPTY_ZIG, previousZig: (previousZig.data as ZigDashboard | null) ?? EMPTY_ZIG, sectorProfitability: (sectorProfitability.data as SectorProfitability | null) ?? EMPTY_SECTOR_PROFITABILITY, products: catalogItems.length, suppliers: suppliers.count ?? 0, areas: (areas.data ?? []) as Area[] };
+  return { sales: (sales.data ?? []) as unknown as Sale[], saleItems: (items.data ?? []) as unknown as SaleItem[], payments: (payments.data ?? []) as PaymentMethod[], expenses: (expenses.data ?? []) as Expense[], forecasts: (forecasts.data ?? []) as unknown as Forecast[], catalogItems, ingredients, costHistory: (costHistory.data ?? []) as CostHistory[], recipes: (recipes.data ?? []) as Recipe[], recipeItems: (recipeItems.data ?? []) as RecipeItem[], imports: (imports.data ?? []) as ImportRow[], profitabilityImports: (profitabilityImports.data ?? []) as ProfitabilityImport[], profitabilityItems: (profitabilityItems.data ?? []) as ProfitabilityItem[], abcImports: (abcImports.data ?? []) as AbcImport[], abcItems: (abcItems.data ?? []) as AbcItem[], zig: (zig.data as ZigDashboard | null) ?? EMPTY_ZIG, previousZig: (previousZig.data as ZigDashboard | null) ?? EMPTY_ZIG, sectorProfitability: (sectorProfitability.data as SectorProfitability | null) ?? EMPTY_SECTOR_PROFITABILITY, previousSectorProfitability: (previousSectorProfitability.data as SectorProfitability | null) ?? EMPTY_SECTOR_PROFITABILITY, products: catalogItems.length, suppliers: suppliers.count ?? 0, areas: (areas.data ?? []) as Area[] };
 }
 
 export function DashboardShell() {
@@ -223,7 +229,7 @@ export function DashboardShell() {
     {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu" />}
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
       <div className="sidebar-brand"><div className="sidebar-logo"><Image src="/dopamina-logo.png" alt="Dopamina" width={54} height={50} unoptimized /></div><button className="close-sidebar-mobile" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X size={20} /></button></div>
-      <nav className="sidebar-nav" aria-label="Navegação principal"><span className="nav-caption">Principal</span>{NAV_ITEMS.slice(0, 7).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}<span className="nav-caption nav-caption-space">Sistema</span>{NAV_ITEMS.slice(7).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}</nav>
+      <nav className="sidebar-nav" aria-label="Navegação principal"><span className="nav-caption">Principal</span>{NAV_ITEMS.slice(0, 8).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}<span className="nav-caption nav-caption-space">Sistema</span>{NAV_ITEMS.slice(8).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}</nav>
       <div className="sidebar-footer"><button className="user-menu" title={profile?.full_name ?? "Usuário"}><span className="user-avatar">{(profile?.full_name ?? "D").charAt(0).toUpperCase()}</span><span className="user-copy"><strong>{profile?.full_name ?? "Usuário"}</strong><small>{membership.role === "owner" ? "Proprietário" : "Gerência"}</small></span></button><button className="logout-button" onClick={signOut} aria-label="Sair"><LogOut size={18} /></button></div>
       <button className="compact-toggle" onClick={() => setSidebarCompact((current) => !current)} aria-label={sidebarCompact ? "Expandir menu" : "Recolher menu"}>{sidebarCompact ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}</button>
     </aside>
@@ -239,10 +245,11 @@ function SectionContent(props: { section: Section; setSection: (section: Section
   if (props.section === "cmv") return <CmvPage {...props} />;
   if (props.section === "despesas") return <ExpensesPage {...props} />;
   if (props.section === "setores") return <SectorProfitabilityPage {...props} />;
+  if (props.section === "produtos") return <ProductProfitabilityPage {...props} />;
   if (props.section === "planejamento") return <PlanningPage {...props} />;
   if (props.section === "cadastros") return <CatalogPage {...props} />;
   if (props.section === "importacoes") return <ImportsPage {...props} />;
-  const content: Record<Exclude<Section, "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "planejamento" | "cadastros" | "importacoes">, { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; columns: string[] }> = {
+  const content: Record<Exclude<Section, "visao-geral" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "planejamento" | "cadastros" | "importacoes">, { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; columns: string[] }> = {
     estoque: { eyebrow: "Operação", title: "Estoque e movimentações", description: "Visualize saldos, entradas, perdas e contagens do bar.", action: "Nova contagem", icon: <PackageSearch size={19} />, columns: ["Item", "Área", "Unidade", "Saldo atual", "Custo médio", "Situação"] },
     configuracoes: { eyebrow: "Administração", title: "Configurações e acessos", description: "Gerencie usuários, dados do negócio e histórico de alterações.", action: "Convidar usuário", icon: <UsersRound size={19} />, columns: ["Usuário", "E-mail", "Perfil", "Status", "Último acesso"] },
   };
@@ -493,6 +500,118 @@ function SectorProfitabilityPage(props: Parameters<typeof SectionContent>[0]) {
     </section>
     <section className="sector-expense-assignment"><div className="sector-detail-head"><div><p>Classificação segura</p><h3>Despesas diretamente relacionadas</h3><span>Atribua somente quando a despesa pertencer claramente a um container. Deixe como geral quando houver dúvida.</span></div></div>{confirmedExpenses.length ? <div className="expense-assignment-list">{confirmedExpenses.map((expense) => <div key={expense.id}><span><strong>{expense.description}</strong><small>{expense.category} · {MONEY.format(expense.amount)}</small></span><select aria-label={`Setor da despesa ${expense.description}`} value={expense.area_id ?? ""} disabled={assigningExpense === expense.id} onChange={(event) => assignExpense(expense, event.target.value)}><option value="">Geral / não atribuída</option>{areaOptions.map((option) => <option key={option.sector} value={option.area.id}>{option.sector}</option>)}</select></div>)}</div> : <EmptyMini text="Nenhuma despesa paga ou pendente neste período para classificar." />}</section>
   </section>;
+}
+
+function productProfitabilityKey(product: SectorProduct) {
+  return product.item_id ? `item:${product.item_id}` : `source:${product.sku ?? ""}:${product.name.trim().toLocaleLowerCase("pt-BR")}`;
+}
+
+function median(values: number[]) {
+  if (!values.length) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+}
+
+function ProductProfitabilityPage(props: Parameters<typeof SectionContent>[0]) {
+  const [sectorFilter, setSectorFilter] = useState("all");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<ProductSort>("profit_desc");
+  const analysis = useMemo(() => {
+    const previous = new Map(props.data.previousSectorProfitability.products.map((product) => [productProfitabilityKey(product), product]));
+    const totalRevenue = props.data.sectorProfitability.products.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
+    const base = props.data.sectorProfitability.products.map((product) => {
+      const quantity = Number(product.quantity);
+      const revenue = Number(product.revenue_cents) / 100;
+      const costedQuantity = Number(product.costed_quantity);
+      const missingQuantity = Number(product.missing_cost_quantity);
+      const knownCmv = Number(product.known_cmv ?? 0);
+      const costStatus: ProductCostStatus = costedQuantity <= 0 ? "missing" : missingQuantity > 0 ? "partial" : "known";
+      const unitCost = costedQuantity > 0 ? knownCmv / costedQuantity : null;
+      const cmv = costStatus === "known" ? knownCmv : null;
+      const profit = cmv === null ? null : revenue - cmv;
+      const prior = previous.get(productProfitabilityKey(product));
+      const priorCostedQuantity = Number(prior?.costed_quantity ?? 0);
+      const priorUnitCost = priorCostedQuantity > 0 ? Number(prior?.known_cmv ?? 0) / priorCostedQuantity : null;
+      return {
+        key: productProfitabilityKey(product), itemId: product.item_id, name: product.name, sku: product.sku,
+        category: product.category || "Sem categoria", sector: product.sector || "Sem setor", quantity, revenue,
+        share: totalRevenue > 0 ? revenue / totalRevenue : 0, costedQuantity, missingQuantity, costStatus, unitCost, knownCmv, cmv,
+        profit, unitProfit: profit !== null && quantity > 0 ? profit / quantity : null,
+        margin: profit !== null && revenue > 0 ? profit / revenue : null, averagePrice: quantity > 0 ? revenue / quantity : null,
+        costChange: unitCost !== null && priorUnitCost !== null && priorUnitCost > 0 ? (unitCost - priorUnitCost) / priorUnitCost : null,
+        performance: "unknown" as ProductPerformance,
+      } satisfies ProductProfitabilityRow;
+    });
+    const known = base.filter((row) => row.costStatus === "known" && row.margin !== null);
+    const salesCut = median(base.filter((row) => row.quantity > 0).map((row) => row.quantity));
+    const revenueCut = median(base.filter((row) => row.revenue > 0).map((row) => row.revenue));
+    const knownRevenue = known.reduce((sum, row) => sum + row.revenue, 0);
+    const marginCut = knownRevenue > 0 ? known.reduce((sum, row) => sum + Number(row.profit), 0) / knownRevenue : 0;
+    const rows = base.map((row) => {
+      if (row.margin === null) return row;
+      const highSales = row.quantity >= salesCut;
+      const highMargin = row.margin >= marginCut;
+      const performance: ProductPerformance = highSales ? (highMargin ? "star" : "attention") : (highMargin ? "opportunity" : "low");
+      return { ...row, performance };
+    });
+    return { rows, totalRevenue, salesCut, revenueCut, marginCut };
+  }, [props.data.sectorProfitability, props.data.previousSectorProfitability]);
+
+  const categories = useMemo(() => [...new Set(analysis.rows.map((row) => row.category))].sort((a, b) => a.localeCompare(b, "pt-BR")), [analysis.rows]);
+  const filtered = analysis.rows.filter((row) => {
+    const matchesQuery = `${row.name} ${row.sku ?? ""} ${row.category}`.toLocaleLowerCase("pt-BR").includes(query.trim().toLocaleLowerCase("pt-BR"));
+    return matchesQuery && (sectorFilter === "all" || row.sector === sectorFilter) && (categoryFilter === "all" || row.category === categoryFilter);
+  });
+  const performanceRank: Record<ProductPerformance, number> = { attention: 0, opportunity: 1, star: 2, low: 3, unknown: 4 };
+  const rows = [...filtered].sort((a, b) => {
+    if (sort === "quantity_desc") return b.quantity - a.quantity;
+    if (sort === "revenue_desc") return b.revenue - a.revenue;
+    if (sort === "margin_desc") return (b.margin ?? -Infinity) - (a.margin ?? -Infinity);
+    if (sort === "margin_asc") return (a.margin ?? Infinity) - (b.margin ?? Infinity);
+    if (sort === "cmv_desc") return (b.cmv ?? -Infinity) - (a.cmv ?? -Infinity);
+    if (sort === "high_sales_low_profit") return performanceRank[a.performance] - performanceRank[b.performance] || b.quantity - a.quantity;
+    if (sort === "low_sales_high_margin") return (a.performance === "opportunity" ? 0 : 1) - (b.performance === "opportunity" ? 0 : 1) || (b.margin ?? -Infinity) - (a.margin ?? -Infinity);
+    return (b.profit ?? -Infinity) - (a.profit ?? -Infinity);
+  });
+  const known = analysis.rows.filter((row) => row.profit !== null);
+  const bestProfit = known.length ? known.reduce((best, row) => Number(row.profit) > Number(best.profit) ? row : best) : null;
+  const attention = analysis.rows.filter((row) => row.performance === "attention").sort((a, b) => b.revenue - a.revenue)[0] ?? null;
+  const opportunity = analysis.rows.filter((row) => row.performance === "opportunity").sort((a, b) => Number(b.margin) - Number(a.margin))[0] ?? null;
+  const priceReview = known.filter((row) => Number(row.margin) < .2 || (row.performance === "attention" && row.revenue >= analysis.revenueCut)).sort((a, b) => b.revenue - a.revenue)[0] ?? null;
+  const alerts = analysis.rows.flatMap((row) => {
+    const found: { row: ProductProfitabilityRow; label: string; detail: string; priority: number }[] = [];
+    if (row.costStatus === "missing") found.push({ row, label: "Sem custo cadastrado", detail: "Cadastre o custo ou a ficha técnica antes de analisar a margem.", priority: 0 });
+    else if (row.costStatus === "partial") found.push({ row, label: "Custo incompleto", detail: `${NUMBER.format(row.missingQuantity)} unidade(s) sem custo no período.`, priority: 0 });
+    if (row.costChange !== null && row.costChange >= .1) found.push({ row, label: "Custo aumentou", detail: `${NUMBER.format(row.costChange * 100)}% contra o período anterior.`, priority: 1 });
+    if (row.margin !== null && row.margin < .2) found.push({ row, label: "Margem muito baixa", detail: `${NUMBER.format(row.margin * 100)}% de margem bruta.`, priority: 2 });
+    if (row.margin !== null && row.revenue >= analysis.revenueCut && row.margin < analysis.marginCut) found.push({ row, label: "Fatura bem, lucra pouco", detail: `${MONEY.format(row.revenue)} faturados com margem abaixo da média.`, priority: 3 });
+    return found;
+  }).sort((a, b) => a.priority - b.priority || b.row.revenue - a.row.revenue).slice(0, 8);
+  const quadrant = (performance: ProductPerformance) => analysis.rows.filter((row) => row.performance === performance).sort((a, b) => b.revenue - a.revenue);
+
+  return <section className="product-profit-page"><ModuleHero eyebrow="Decisão de cardápio" title="Rentabilidade por produto" description="Descubra o que mais vende, o que realmente dá dinheiro e onde preço ou custo precisam de atenção." action="Revisar custos" icon={<PackageSearch size={20} />} onAction={() => props.setSection("cadastros")} />
+    <p className="product-profit-source"><CheckCircle2 size={16} />Vendas reais da Zig e custo histórico válido na data de cada venda. Margens incompletas nunca são estimadas.</p>
+    <div className="product-decision-grid"><ProductDecisionCard label="Qual mais dá dinheiro?" row={bestProfit} value={bestProfit?.profit === null || !bestProfit ? "Sem dados confiáveis" : MONEY.format(bestProfit.profit)} note={bestProfit ? `${MONEY.format(bestProfit.revenue)} faturados` : "Complete os custos dos produtos"} tone="green" /><ProductDecisionCard label="Vende muito, lucra pouco" row={attention} value={attention?.margin === null || !attention ? "Nenhum identificado" : `${NUMBER.format(attention.margin * 100)}% de margem`} note={attention ? `${NUMBER.format(attention.quantity)} unidades vendidas` : "No período selecionado"} tone="red" /><ProductDecisionCard label="Deveríamos vender mais" row={opportunity} value={opportunity?.margin === null || !opportunity ? "Nenhum identificado" : `${NUMBER.format(opportunity.margin * 100)}% de margem`} note={opportunity ? `Só ${NUMBER.format(opportunity.quantity)} unidades vendidas` : "No período selecionado"} tone="blue" /><ProductDecisionCard label="Pode precisar de preço" row={priceReview} value={priceReview?.margin === null || !priceReview ? "Nenhum identificado" : `${NUMBER.format(priceReview.margin * 100)}% de margem`} note={priceReview ? `${MONEY.format(priceReview.averagePrice ?? 0)} de preço médio` : "No período selecionado"} tone="yellow" /></div>
+    <div className="product-analysis-grid"><article className="product-profit-panel"><div className="product-panel-heading"><div><p>Mapa de desempenho</p><h3>Venda × margem</h3></div><span>Corte: {NUMBER.format(analysis.salesCut)} un. · {NUMBER.format(analysis.marginCut * 100)}% margem</span></div><div className="product-quadrant-grid"><ProductQuadrantCard performance="star" title="Produtos estrela" description="Alta venda + alta margem" rows={quadrant("star")} /><ProductQuadrantCard performance="attention" title="Precisam de atenção" description="Alta venda + baixa margem" rows={quadrant("attention")} /><ProductQuadrantCard performance="opportunity" title="Oportunidade" description="Baixa venda + alta margem" rows={quadrant("opportunity")} /><ProductQuadrantCard performance="low" title="Baixo desempenho" description="Baixa venda + baixa margem" rows={quadrant("low")} /></div></article>
+      <article className="product-profit-panel product-alert-panel"><div className="product-panel-heading"><div><p>Alertas automáticos</p><h3>O que revisar primeiro</h3></div><TriangleAlert size={19} /></div>{alerts.length ? <div className="product-alert-list">{alerts.map((alert, index) => <div key={`${alert.row.key}-${alert.label}-${index}`}><span className={`product-alert-dot priority-${alert.priority}`} /><div><strong>{alert.row.name}</strong><span>{alert.label}</span><small>{alert.detail}</small></div></div>)}</div> : <EmptyMini text="Nenhum alerta encontrado no período." />}</article></div>
+    <div className="module-toolbar product-profit-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto, SKU ou categoria" /></label><select value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value)} aria-label="Filtrar por setor"><option value="all">Todos os setores</option><option value="Bar">Bar</option><option value="Drinks">Drinks</option><option value="Cozinha">Cozinha</option><option value="Churrasqueira">Churrasqueira</option><option value="Sem setor">Sem setor</option></select><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="Filtrar por categoria"><option value="all">Todas as categorias</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select><select value={sort} onChange={(event) => setSort(event.target.value as ProductSort)} aria-label="Ordenar produtos"><option value="profit_desc">Maior lucro</option><option value="quantity_desc">Mais vendidos</option><option value="revenue_desc">Maior faturamento</option><option value="margin_desc">Maior margem</option><option value="margin_asc">Menor margem</option><option value="cmv_desc">Maior CMV</option><option value="high_sales_low_profit">Alta venda, baixo lucro</option><option value="low_sales_high_margin">Baixa venda, boa margem</option></select><span className="table-count">{rows.length} produto(s)</span></div>
+    <div className="data-table-card"><div className="responsive-table product-profit-table"><div className="table-row table-header"><span>Produto</span><span>Setor</span><span>Qtd.</span><span>Faturamento</span><span>Participação</span><span>Custo unit.</span><span>CMV total</span><span>Lucro bruto</span><span>Lucro/un.</span><span>Margem</span><span>Preço médio</span></div>{rows.length ? rows.map((row) => <ProductProfitabilityTableRow key={row.key} row={row} />) : <EmptyMini text="Nenhum produto encontrado com estes filtros." />}</div></div>
+  </section>;
+}
+
+function ProductDecisionCard({ label, row, value, note, tone }: { label: string; row: ProductProfitabilityRow | null; value: string; note: string; tone: "green" | "red" | "blue" | "yellow" }) {
+  return <article className={`product-decision-card ${tone}`}><span>{label}</span><strong>{row?.name ?? "Sem dados"}</strong><b>{value}</b><small>{note}</small></article>;
+}
+
+function ProductQuadrantCard({ performance, title, description, rows }: { performance: ProductPerformance; title: string; description: string; rows: ProductProfitabilityRow[] }) {
+  return <article className={`product-quadrant-card ${performance}`}><header><div><strong>{title}</strong><span>{description}</span></div><b>{rows.length}</b></header>{rows.length ? <ul>{rows.slice(0, 3).map((row) => <li key={row.key}><span>{row.name}</span><strong>{row.margin === null ? "—" : `${NUMBER.format(row.margin * 100)}%`}</strong></li>)}</ul> : <small>Nenhum produto nesta faixa.</small>}</article>;
+}
+
+function ProductProfitabilityTableRow({ row }: { row: ProductProfitabilityRow }) {
+  const performanceLabels: Record<ProductPerformance, string> = { star: "Estrela", attention: "Atenção", opportunity: "Oportunidade", low: "Baixo desempenho", unknown: "Custo incompleto" };
+  return <div className="table-row"><strong>{row.name}<small className="sku-hint">{row.category}{row.sku ? ` · ${row.sku}` : ""}</small><small className={`product-performance-badge ${row.performance}`}>{performanceLabels[row.performance]}</small></strong><span>{row.sector}</span><span>{NUMBER.format(row.quantity)}</span><strong>{MONEY.format(row.revenue)}</strong><span>{NUMBER.format(row.share * 100)}%</span><span className="product-cost-cell">{row.unitCost === null ? "—" : MONEY.format(row.unitCost)}{row.costStatus === "partial" && <small>Parcial</small>}</span><span className="product-cost-cell">{row.cmv === null ? row.costStatus === "partial" ? MONEY.format(row.knownCmv) : "—" : MONEY.format(row.cmv)}{row.costStatus !== "known" && <small>{row.costStatus === "partial" ? "Parcial" : "Sem custo"}</small>}</span><strong>{row.profit === null ? "—" : MONEY.format(row.profit)}</strong><span>{row.unitProfit === null ? "—" : MONEY.format(row.unitProfit)}</span><span className={row.margin !== null && row.margin < .2 ? "negative" : ""}>{row.margin === null ? <small className="cost-badge missing">Custo incompleto</small> : `${NUMBER.format(row.margin * 100)}%`}</span><span>{row.averagePrice === null ? "—" : MONEY.format(row.averagePrice)}</span></div>;
 }
 
 function CatalogPage(props: Parameters<typeof SectionContent>[0]) {
