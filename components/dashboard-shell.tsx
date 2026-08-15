@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight, ArrowUpRight, BarChart3, Boxes, Building2, CalendarRange,
-  CheckCircle2, ChevronDown, CircleDollarSign, ClipboardList, FileSpreadsheet,
+  CheckCircle2, ChefHat, ChevronDown, CircleDollarSign, ClipboardList, Clock3, FileSpreadsheet,
   FileUp, LayoutDashboard, LogOut, Menu, PackageSearch, PanelLeftClose, Pencil,
-  ReceiptText, Search, Settings, ShoppingCart, Trash2, TrendingUp, TriangleAlert,
+  Plus, ReceiptText, Search, Settings, ShoppingCart, Trash2, TrendingUp, TriangleAlert,
   UsersRound, WalletCards, X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -29,7 +29,10 @@ type PaymentMethod = { id: string; import_id: string; payment_method: string; am
 type Expense = { id: string; category: string; description: string; expense_date: string; due_date: string | null; paid_at: string | null; amount: number; payment_method: string | null; status: "draft" | "pending" | "completed" | "cancelled"; is_recurring: boolean };
 type ImportRow = { id: string; file_name: string; period_start: string | null; period_end: string | null; row_count: number; status: string; created_at: string };
 type Area = { id: string; name: string };
-type CatalogItem = { id: string; name: string; sku: string | null; item_type: string; consumption_unit: string; sale_price: number | null; latest_unit_cost: number | null; average_unit_cost: number | null; minimum_stock: number; is_active: boolean; zig_product_id: string | null; categories: { name: string } | { name: string }[] | null; areas: { name: string } | { name: string }[] | null };
+type CatalogItem = { id: string; name: string; sku: string | null; item_type: "ingredient" | "product" | "consumable"; consumption_unit: string; costing_method: "simple" | "recipe"; sale_price: number | null; latest_unit_cost: number | null; average_unit_cost: number | null; minimum_stock: number; is_active: boolean; zig_product_id: string | null; categories: { name: string } | { name: string }[] | null; areas: { name: string } | { name: string }[] | null };
+type CostHistory = { id: string; item_id: string; unit_cost: number; effective_from: string; source: "manual" | "recipe" | "import" | "purchase"; created_at: string };
+type Recipe = { id: string; product_id: string; yield_quantity: number; notes: string | null; effective_from: string; created_at: string };
+type RecipeItem = { id: string; recipe_id: string; ingredient_id: string; quantity: number; waste_percentage: number };
 type Forecast = { id: string; area_id: string | null; forecast_type: "revenue" | "expense"; period_start: string; period_end: string; amount: number; notes: string | null; areas: { name: string } | { name: string }[] | null };
 type ProfitabilityImport = { id: string; sale_id: string; period_start: string; period_end: string; source_revenue: number; known_cost_total: number; row_count: number; missing_cost_count: number; created_at: string };
 type ProfitabilityItem = { id: string; import_id: string; source_product_name: string; source_sku: string | null; source_category: string | null; quantity: number; gross_amount: number; unit_cost: number | null; total_cost: number | null; profit_amount: number; margin_percentage: number; cmv_percentage: number; cost_status: "known" | "missing" };
@@ -39,16 +42,16 @@ type ZigDashboard = {
   period_start: string;
   period_end: string;
   summary: { gross_cents: number; discount_cents: number; net_cents: number; revenue_cents: number; quantity: number; transaction_count: number; refunded_item_count: number };
-  products: { item_id: string; name: string; sku: string | null; category: string; area: string; quantity: number; gross_cents: number; discount_cents: number; net_cents: number }[];
+  products: { item_id: string; name: string; sku: string | null; category: string; area: string; quantity: number; gross_cents: number; discount_cents: number; net_cents: number; costed_quantity?: number; missing_cost_quantity?: number; known_net_cents?: number; total_cost?: number | null; unit_cost?: number | null }[];
   payments: { payment_name: string; value_cents: number }[];
   daily: { operational_date: string; net_cents: number; transaction_count: number }[];
   sync: { endpoint: string; status: string; last_success_at: string | null; last_successful_date: string | null; error_message: string | null }[];
 };
 type DateRange = { start: string; end: string };
-type DataState = { sales: Sale[]; saleItems: SaleItem[]; payments: PaymentMethod[]; expenses: Expense[]; forecasts: Forecast[]; catalogItems: CatalogItem[]; imports: ImportRow[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; abcImports: AbcImport[]; abcItems: AbcItem[]; zig: ZigDashboard; products: number; suppliers: number; areas: Area[] };
+type DataState = { sales: Sale[]; saleItems: SaleItem[]; payments: PaymentMethod[]; expenses: Expense[]; forecasts: Forecast[]; catalogItems: CatalogItem[]; ingredients: CatalogItem[]; costHistory: CostHistory[]; recipes: Recipe[]; recipeItems: RecipeItem[]; imports: ImportRow[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; abcImports: AbcImport[]; abcItems: AbcItem[]; zig: ZigDashboard; products: number; suppliers: number; areas: Area[] };
 
 const EMPTY_ZIG: ZigDashboard = { period_start: "", period_end: "", summary: { gross_cents: 0, discount_cents: 0, net_cents: 0, revenue_cents: 0, quantity: 0, transaction_count: 0, refunded_item_count: 0 }, products: [], payments: [], daily: [], sync: [] };
-const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses: [], forecasts: [], catalogItems: [], imports: [], profitabilityImports: [], profitabilityItems: [], abcImports: [], abcItems: [], zig: EMPTY_ZIG, products: 0, suppliers: 0, areas: [] };
+const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses: [], forecasts: [], catalogItems: [], ingredients: [], costHistory: [], recipes: [], recipeItems: [], imports: [], profitabilityImports: [], profitabilityItems: [], abcImports: [], abcItems: [], zig: EMPTY_ZIG, products: 0, suppliers: 0, areas: [] };
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const NUMBER = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const DATE = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
@@ -71,25 +74,32 @@ function isoInSaoPaulo(date = new Date()) { const parts = new Intl.DateTimeForma
 function shiftDate(date: string, days: number) { const value = new Date(`${date}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10); }
 function selectedRange(period: string, customStart: string, customEnd: string): DateRange { const today = isoInSaoPaulo(); const [year, month] = today.split("-").map(Number); if (period === "today") return { start: today, end: today }; if (period === "yesterday") { const yesterday = shiftDate(today, -1); return { start: yesterday, end: yesterday }; } if (period === "7d") return { start: shiftDate(today, -6), end: today }; if (period === "last_month") { const start = new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 10); const end = new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10); return { start, end }; } if (period === "custom") return { start: customStart || today, end: customEnd || customStart || today }; return { start: `${year}-${String(month).padStart(2, "0")}-01`, end: today }; }
 
-type AutomaticCmvRow = { id: string; itemId: string; name: string; sku: string | null; category: string; quantity: number; revenue: number; unitCost: number | null; totalCost: number | null; margin: number | null; cmv: number | null; costStatus: "known" | "missing" };
+type AutomaticCmvRow = { id: string; itemId: string; name: string; sku: string | null; category: string; quantity: number; revenue: number; knownRevenue: number; unitCost: number | null; totalCost: number | null; margin: number | null; cmv: number | null; costStatus: "known" | "partial" | "missing" };
 function automaticCmvRows(data: DataState): AutomaticCmvRow[] {
   const costs = new Map(data.catalogItems.map((item) => [String(item.id), item]));
   return data.zig.products.map((product) => {
     const item = costs.get(String(product.item_id));
-    const candidateCost = Number(item?.average_unit_cost ?? item?.latest_unit_cost ?? 0);
-    const unitCost = candidateCost > 0 ? candidateCost : null;
     const quantity = Number(product.quantity);
     const revenue = Number(product.net_cents) / 100;
-    const totalCost = unitCost === null ? null : unitCost * quantity;
-    return { id: `api-${product.item_id}`, itemId: String(product.item_id), name: product.name, sku: product.sku, category: product.category, quantity, revenue, unitCost, totalCost, margin: totalCost === null || revenue <= 0 ? null : (revenue - totalCost) / revenue, cmv: totalCost === null || revenue <= 0 ? null : totalCost / revenue, costStatus: unitCost === null ? "missing" : "known" };
+    const hasHistoricalCost = product.costed_quantity !== undefined;
+    const fallbackCost = Number(item?.average_unit_cost ?? item?.latest_unit_cost ?? 0);
+    const costedQuantity = hasHistoricalCost ? Number(product.costed_quantity ?? 0) : (fallbackCost > 0 ? quantity : 0);
+    const missingQuantity = hasHistoricalCost ? Number(product.missing_cost_quantity ?? 0) : (fallbackCost > 0 ? 0 : quantity);
+    const unitCostValue = hasHistoricalCost ? Number(product.unit_cost ?? 0) : fallbackCost;
+    const unitCost = unitCostValue >= 0 && costedQuantity > 0 ? unitCostValue : null;
+    const knownRevenue = hasHistoricalCost ? Number(product.known_net_cents ?? 0) / 100 : (unitCost === null ? 0 : revenue);
+    const totalCostValue = hasHistoricalCost ? Number(product.total_cost ?? 0) : (unitCost === null ? 0 : unitCost * quantity);
+    const totalCost = costedQuantity > 0 ? totalCostValue : null;
+    const costStatus = missingQuantity <= 0 && costedQuantity > 0 ? "known" : costedQuantity > 0 ? "partial" : "missing";
+    return { id: `api-${product.item_id}`, itemId: String(product.item_id), name: product.name, sku: product.sku, category: product.category, quantity, revenue, knownRevenue, unitCost, totalCost, margin: totalCost === null || knownRevenue <= 0 ? null : (knownRevenue - totalCost) / knownRevenue, cmv: totalCost === null || knownRevenue <= 0 ? null : totalCost / knownRevenue, costStatus };
   });
 }
 
 async function fetchData(businessId: string, range: DateRange): Promise<DataState> {
-  const [sales, expenses, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig] = await Promise.all([
+  const [sales, expenses, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig, costHistory, recipes] = await Promise.all([
     supabase.from("sales").select("id,import_id,period_start,period_end,business_date,gross_amount,discount_amount,product_gross_amount,service_amount,revenue_amount,closing_net_amount,open_accounts_amount,recharge_balance_amount,sales_imports(file_name,row_count,created_at)").eq("business_id", businessId).order("business_date", { ascending: false }),
     supabase.from("expenses").select("id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
-    supabase.from("items").select("id,name,sku,item_type,consumption_unit,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(name)").eq("business_id", businessId).eq("item_type", "product").order("name"),
+    supabase.from("items").select("id,name,sku,item_type,consumption_unit,costing_method,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(name)").eq("business_id", businessId).order("name"),
     supabase.from("suppliers").select("id", { count: "exact", head: true }).eq("business_id", businessId),
     supabase.from("areas").select("id,name").eq("business_id", businessId).eq("is_active", true).order("sort_order"),
     supabase.from("forecasts").select("id,area_id,forecast_type,period_start,period_end,amount,notes,areas(name)").eq("business_id", businessId).order("period_start", { ascending: false }),
@@ -97,23 +107,29 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
     supabase.from("zig_profitability_imports").select("id,sale_id,period_start,period_end,source_revenue,known_cost_total,row_count,missing_cost_count,created_at").eq("business_id", businessId).order("period_end", { ascending: false }),
     supabase.from("zig_abc_imports").select("id,file_name,total_value,row_count,missing_cost_count,created_at").eq("business_id", businessId).order("created_at", { ascending: false }),
     supabase.rpc("get_zig_sales_dashboard", { p_business_id: Number(businessId), p_period_start: range.start, p_period_end: range.end }),
+    supabase.from("item_cost_history").select("id,item_id,unit_cost,effective_from,source,created_at").eq("business_id", businessId).order("effective_from", { ascending: false }),
+    supabase.from("recipes").select("id,product_id,yield_quantity,notes,effective_from,created_at").eq("business_id", businessId).order("effective_from", { ascending: false }),
   ]);
-  const firstError = [sales.error, expenses.error, products.error, suppliers.error, areas.error, forecasts.error, imports.error, profitabilityImports.error, abcImports.error, zig.error].find(Boolean);
+  const firstError = [sales.error, expenses.error, products.error, suppliers.error, areas.error, forecasts.error, imports.error, profitabilityImports.error, abcImports.error, zig.error, costHistory.error, recipes.error].find(Boolean);
   if (firstError) throw firstError;
   const saleIds = (sales.data ?? []).map((sale) => sale.id);
   const importIds = (sales.data ?? []).map((sale) => sale.import_id).filter(Boolean) as string[];
   const profitabilityIds = (profitabilityImports.data ?? []).map((row) => row.id);
   const latestAbcId = abcImports.data?.[0]?.id;
-  const [items, payments, profitabilityItems, abcItems] = await Promise.all([
+  const recipeIds = (recipes.data ?? []).map((row) => row.id);
+  const [items, payments, profitabilityItems, abcItems, recipeItems] = await Promise.all([
     saleIds.length ? supabase.from("sale_items").select("id,sale_id,quantity,gross_amount,discount_amount,transaction_type,items(name,sku,categories(name)),areas(name)").in("sale_id", saleIds) : Promise.resolve({ data: [], error: null }),
     importIds.length ? supabase.from("sales_payment_methods").select("id,import_id,payment_method,amount,percentage").in("import_id", importIds) : Promise.resolve({ data: [], error: null }),
     profitabilityIds.length ? supabase.from("zig_profitability_items").select("id,import_id,source_product_name,source_sku,source_category,quantity,gross_amount,unit_cost,total_cost,profit_amount,margin_percentage,cmv_percentage,cost_status").in("import_id", profitabilityIds) : Promise.resolve({ data: [], error: null }),
     latestAbcId ? supabase.from("zig_abc_items").select("id,import_id,source_product_name,source_sku,quantity,average_unit_cost,total_value,individual_percentage,cumulative_percentage,classification").eq("import_id", latestAbcId).order("cumulative_percentage") : Promise.resolve({ data: [], error: null }),
+    recipeIds.length ? supabase.from("recipe_items").select("id,recipe_id,ingredient_id,quantity,waste_percentage").in("recipe_id", recipeIds) : Promise.resolve({ data: [], error: null }),
   ]);
-  const detailError = [items.error, payments.error, profitabilityItems.error, abcItems.error].find(Boolean);
+  const detailError = [items.error, payments.error, profitabilityItems.error, abcItems.error, recipeItems.error].find(Boolean);
   if (detailError) throw detailError;
-  const catalogItems = (products.data ?? []) as unknown as CatalogItem[];
-  return { sales: (sales.data ?? []) as unknown as Sale[], saleItems: (items.data ?? []) as unknown as SaleItem[], payments: (payments.data ?? []) as PaymentMethod[], expenses: (expenses.data ?? []) as Expense[], forecasts: (forecasts.data ?? []) as unknown as Forecast[], catalogItems, imports: (imports.data ?? []) as ImportRow[], profitabilityImports: (profitabilityImports.data ?? []) as ProfitabilityImport[], profitabilityItems: (profitabilityItems.data ?? []) as ProfitabilityItem[], abcImports: (abcImports.data ?? []) as AbcImport[], abcItems: (abcItems.data ?? []) as AbcItem[], zig: (zig.data as ZigDashboard | null) ?? EMPTY_ZIG, products: catalogItems.length, suppliers: suppliers.count ?? 0, areas: (areas.data ?? []) as Area[] };
+  const allItems = (products.data ?? []) as unknown as CatalogItem[];
+  const catalogItems = allItems.filter((item) => item.item_type === "product");
+  const ingredients = allItems.filter((item) => item.item_type !== "product");
+  return { sales: (sales.data ?? []) as unknown as Sale[], saleItems: (items.data ?? []) as unknown as SaleItem[], payments: (payments.data ?? []) as PaymentMethod[], expenses: (expenses.data ?? []) as Expense[], forecasts: (forecasts.data ?? []) as unknown as Forecast[], catalogItems, ingredients, costHistory: (costHistory.data ?? []) as CostHistory[], recipes: (recipes.data ?? []) as Recipe[], recipeItems: (recipeItems.data ?? []) as RecipeItem[], imports: (imports.data ?? []) as ImportRow[], profitabilityImports: (profitabilityImports.data ?? []) as ProfitabilityImport[], profitabilityItems: (profitabilityItems.data ?? []) as ProfitabilityItem[], abcImports: (abcImports.data ?? []) as AbcImport[], abcItems: (abcItems.data ?? []) as AbcItem[], zig: (zig.data as ZigDashboard | null) ?? EMPTY_ZIG, products: catalogItems.length, suppliers: suppliers.count ?? 0, areas: (areas.data ?? []) as Area[] };
 }
 
 export function DashboardShell() {
@@ -272,22 +288,24 @@ function CmvPage(props: Parameters<typeof SectionContent>[0]) {
   const [showImport, setShowImport] = useState(false);
   const [query, setQuery] = useState("");
   const automaticRows = automaticCmvRows(props.data);
-  const sourceRows: AutomaticCmvRow[] = automaticRows.length ? automaticRows : props.profitabilityItems.map((row) => ({ id: `report-${row.id}`, itemId: "", name: row.source_product_name, sku: row.source_sku, category: row.source_category ?? "Sem categoria", quantity: Number(row.quantity), revenue: Number(row.gross_amount), unitCost: row.unit_cost === null ? null : Number(row.unit_cost), totalCost: row.total_cost === null ? null : Number(row.total_cost), margin: row.cost_status === "known" ? Number(row.margin_percentage) : null, cmv: row.cost_status === "known" ? Number(row.cmv_percentage) : null, costStatus: row.cost_status }));
+  const sourceRows: AutomaticCmvRow[] = automaticRows.length ? automaticRows : props.profitabilityItems.map((row) => ({ id: `report-${row.id}`, itemId: "", name: row.source_product_name, sku: row.source_sku, category: row.source_category ?? "Sem categoria", quantity: Number(row.quantity), revenue: Number(row.gross_amount), knownRevenue: row.cost_status === "known" ? Number(row.gross_amount) : 0, unitCost: row.unit_cost === null ? null : Number(row.unit_cost), totalCost: row.total_cost === null ? null : Number(row.total_cost), margin: row.cost_status === "known" ? Number(row.margin_percentage) : null, cmv: row.cost_status === "known" ? Number(row.cmv_percentage) : null, costStatus: row.cost_status }));
   const rows = sourceRows.filter((row) => `${row.name} ${row.sku ?? ""} ${row.category}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => b.revenue - a.revenue);
   const gross = sourceRows.reduce((sum, row) => sum + row.revenue, 0);
   const knownCost = sourceRows.reduce((sum, row) => sum + Number(row.totalCost ?? 0), 0);
-  const knownRevenue = sourceRows.filter((row) => row.costStatus === "known").reduce((sum, row) => sum + row.revenue, 0);
-  const missingRevenue = sourceRows.filter((row) => row.costStatus === "missing").reduce((sum, row) => sum + row.revenue, 0);
+  const knownRevenue = sourceRows.reduce((sum, row) => sum + row.knownRevenue, 0);
+  const missingRevenue = Math.max(0, gross - knownRevenue);
   const coverage = gross > 0 ? knownRevenue / gross : 0;
   const knownMargin = knownRevenue > 0 ? (knownRevenue - knownCost) / knownRevenue : 0;
-  const missingCount = sourceRows.filter((row) => row.costStatus === "missing").length;
+  const missingCount = sourceRows.filter((row) => row.costStatus !== "known").length;
+  let abcCumulative = 0;
+  const salesAbc = [...sourceRows].sort((a, b) => b.revenue - a.revenue).map((row) => { const previous = abcCumulative; abcCumulative += gross > 0 ? row.revenue / gross : 0; return { classification: (previous < .8 ? "A" : previous < .95 ? "B" : "C") as "A" | "B" | "C", total_value: row.revenue }; });
 
   return <section><ModuleHero eyebrow="Rentabilidade" title="CMV e margem de lucro" description={automaticRows.length ? "Calculado automaticamente sobre as vendas sincronizadas e os custos do cadastro central." : "Exibindo o relatório de CMV disponível; sincronize vendas para automatizar o cálculo."} action="Revisar custos" icon={<CircleDollarSign size={22} />} onAction={() => props.setSection("cadastros")} />
     <div className="section-kpis"><MiniKpi label="Receita analisada" value={MONEY.format(gross)} /><MiniKpi label="CMV conhecido" value={MONEY.format(knownCost)} /><MiniKpi label="Margem conhecida" value={knownRevenue ? `${NUMBER.format(knownMargin * 100)}%` : "—"} /><MiniKpi label="Cobertura de custos" value={`${NUMBER.format(coverage * 100)}%`} /></div>
     {missingCount > 0 && <div className="data-warning"><TriangleAlert size={19} /><div><strong>{missingCount} produto(s) sem custo confiável</strong><span>{MONEY.format(missingRevenue)} da receita não entra no CMV conhecido. Cadastre o custo médio para completar a margem sem estimativas ocultas.</span></div></div>}
-    <div className="cmv-layout"><article className="chart-card"><div className="card-title-row"><div><p>Cobertura</p><h3>Faturamento com custo</h3></div><strong>{NUMBER.format(coverage * 100)}%</strong></div><CoverageBar known={knownRevenue} missing={missingRevenue} /></article><article className="chart-card"><div className="card-title-row"><div><p>Curva ABC</p><h3>Último snapshot importado</h3></div><span>{props.data.abcImports[0] ? DATE.format(new Date(props.data.abcImports[0].created_at)) : "Sem dados"}</span></div><AbcSummary rows={props.data.abcItems} /></article></div>
+    <div className="cmv-layout"><article className="chart-card"><div className="card-title-row"><div><p>Cobertura</p><h3>Faturamento com custo</h3></div><strong>{NUMBER.format(coverage * 100)}%</strong></div><CoverageBar known={knownRevenue} missing={missingRevenue} /></article><article className="chart-card"><div className="card-title-row"><div><p>Curva ABC de vendas</p><h3>Importância no faturamento</h3></div><span>{automaticRows.length ? "Período selecionado" : "Relatório importado"}</span></div><p className="abc-help">A concentra os produtos que formam cerca de 80% da receita; B vai até 95%; C reúne os demais.</p><AbcSummary rows={automaticRows.length ? salesAbc : props.data.abcItems} /></article></div>
     <div className="module-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto, SKU ou categoria" /></label><span className="table-count">{rows.length} linha(s)</span></div>
-    <div className="data-table-card"><div className="responsive-table cmv-table"><div className="table-row table-header"><span>Produto</span><span>Categoria</span><span>Receita</span><span>Custo unit.</span><span>CMV</span><span>Margem</span><span>Status</span></div>{rows.length ? rows.map((row) => <div className="table-row" key={row.id}><strong>{row.name}<small className="sku-hint">{row.sku || "Sem SKU"}</small></strong><span>{row.category}</span><strong>{MONEY.format(row.revenue)}</strong><span>{row.unitCost === null ? "—" : MONEY.format(row.unitCost)}</span><span>{row.cmv === null ? "—" : `${NUMBER.format(row.cmv * 100)}%`}</span><span>{row.margin === null ? "—" : `${NUMBER.format(row.margin * 100)}%`}</span><span className={`cost-badge ${row.costStatus}`}>{row.costStatus === "known" ? "Automático" : "Sem custo"}</span></div>) : <EmptyMini text="Sincronize as vendas ou importe um relatório de CMV para liberar a rentabilidade." />}</div></div>
+    <div className="data-table-card"><div className="responsive-table cmv-table"><div className="table-row table-header"><span>Produto</span><span>Categoria</span><span>Receita</span><span>Custo unit.</span><span>CMV</span><span>Margem</span><span>Status</span></div>{rows.length ? rows.map((row) => <div className="table-row" key={row.id}><strong>{row.name}<small className="sku-hint">{row.sku || "Sem SKU"}</small></strong><span>{row.category}</span><strong>{MONEY.format(row.revenue)}</strong><span>{row.unitCost === null ? "—" : MONEY.format(row.unitCost)}</span><span>{row.cmv === null ? "—" : `${NUMBER.format(row.cmv * 100)}%`}</span><span>{row.margin === null ? "—" : `${NUMBER.format(row.margin * 100)}%`}</span><span className={`cost-badge ${row.costStatus === "known" ? "known" : "missing"}`}>{row.costStatus === "known" ? "Histórico aplicado" : row.costStatus === "partial" ? "Custo parcial" : "Sem custo"}</span></div>) : <EmptyMini text="Sincronize as vendas ou importe um relatório de CMV para liberar a rentabilidade." />}</div></div>
     <button className="spreadsheet-fallback" onClick={() => setShowImport(true)}><FileSpreadsheet size={15} /> Importar CMV / ABC como complemento</button>
     {showImport && <AnalyticsImportModal businessId={props.businessId} onClose={() => setShowImport(false)} onImported={async () => { await props.onRefresh(); setShowImport(false); }} />}
   </section>;
@@ -295,27 +313,130 @@ function CmvPage(props: Parameters<typeof SectionContent>[0]) {
 
 function CatalogPage(props: Parameters<typeof SectionContent>[0]) {
   const [editing, setEditing] = useState<CatalogItem | null>(null);
+  const [editingIngredient, setEditingIngredient] = useState<CatalogItem | "new" | null>(null);
   const [query, setQuery] = useState("");
-  const rows = props.data.catalogItems.filter((item) => `${item.name} ${item.sku ?? ""} ${nested(item.categories)?.name ?? ""} ${nested(item.areas)?.name ?? ""}`.toLowerCase().includes(query.toLowerCase()));
-  const withCost = props.data.catalogItems.filter((item) => Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0) > 0).length;
+  const [view, setView] = useState<"products" | "ingredients">("products");
+  const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "cost" | "recipe">("all");
+  const currentRecipes = new Map<string, Recipe>();
+  props.data.recipes.filter((recipe) => recipe.effective_from <= isoInSaoPaulo()).forEach((recipe) => { if (!currentRecipes.has(String(recipe.product_id))) currentRecipes.set(String(recipe.product_id), recipe); });
+  const recipeWithItems = new Set(props.data.recipeItems.map((component) => String(component.recipe_id)));
+  function statusOf(item: CatalogItem) {
+    const hasCost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0) > 0;
+    if (item.costing_method === "recipe") {
+      const recipe = currentRecipes.get(String(item.id));
+      return recipe && recipeWithItems.has(String(recipe.id)) && hasCost ? "ready" : "recipe";
+    }
+    return hasCost ? "ready" : "cost";
+  }
+  const source = view === "products" ? props.data.catalogItems : props.data.ingredients;
+  const rows = source.filter((item) => {
+    const matchesQuery = `${item.name} ${item.sku ?? ""} ${nested(item.categories)?.name ?? ""} ${nested(item.areas)?.name ?? ""}`.toLowerCase().includes(query.toLowerCase());
+    return matchesQuery && (view === "ingredients" || statusFilter === "all" || statusOf(item) === statusFilter);
+  });
+  const ready = props.data.catalogItems.filter((item) => statusOf(item) === "ready").length;
+  const missingCost = props.data.catalogItems.filter((item) => statusOf(item) === "cost").length;
+  const missingRecipe = props.data.catalogItems.filter((item) => statusOf(item) === "recipe").length;
   const linked = props.data.catalogItems.filter((item) => item.zig_product_id).length;
-  return <section><ModuleHero eyebrow="Base central" title="Produtos e custos" description="Produtos sincronizados da Zig e custos usados automaticamente pelo CMV." action="Revisar pendências" icon={<ClipboardList size={22} />} onAction={() => setQuery("")} />
-    <div className="section-kpis"><MiniKpi label="Produtos" value={String(props.data.catalogItems.length)} /><MiniKpi label="Ligados à Zig" value={String(linked)} /><MiniKpi label="Com custo" value={String(withCost)} /><MiniKpi label="Cobertura cadastral" value={props.data.catalogItems.length ? `${NUMBER.format(withCost / props.data.catalogItems.length * 100)}%` : "0%"} /></div>
-    {withCost < props.data.catalogItems.length && <div className="data-warning"><TriangleAlert size={19} /><div><strong>{props.data.catalogItems.length - withCost} produto(s) sem custo</strong><span>Esses produtos aparecem no CMV, mas ficam fora do custo conhecido até o cadastro ser completado.</span></div></div>}
-    <div className="module-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto, SKU, categoria ou área" /></label><span className="table-count">{rows.length} produto(s)</span></div>
-    <div className="data-table-card"><div className="responsive-table catalog-table"><div className="table-row table-header"><span>Produto</span><span>Categoria</span><span>Área</span><span>Preço de venda</span><span>Custo médio</span><span>Integração</span><span></span></div>{rows.length ? rows.map((item) => { const cost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0); return <div className="table-row" key={item.id}><strong>{item.name}<small className="sku-hint">{item.sku || "Sem SKU"}</small></strong><span>{nested(item.categories)?.name ?? "Sem categoria"}</span><span>{nested(item.areas)?.name ?? "Geral"}</span><span>{item.sale_price === null ? "—" : MONEY.format(Number(item.sale_price))}</span><strong>{cost > 0 ? MONEY.format(cost) : "—"}</strong><span className={`cost-badge ${item.zig_product_id ? "known" : "missing"}`}>{item.zig_product_id ? "Zig conectada" : "Manual"}</span><span className="row-actions"><button onClick={() => setEditing(item)} aria-label={`Editar custos de ${item.name}`}><Pencil size={15} /></button></span></div>; }) : <EmptyMini text="Nenhum produto encontrado." />}</div></div>
-    {editing && <CostModal item={editing} onClose={() => setEditing(null)} onSaved={async () => { await props.onRefresh(); setEditing(null); }} />}
+  return <section><ModuleHero eyebrow="Base central" title="Produtos e fichas técnicas" description="Cadastre custos simples ou monte receitas para copões, drinks e porções." action="Novo ingrediente" icon={<ClipboardList size={22} />} onAction={() => setEditingIngredient("new")} />
+    <div className="section-kpis"><MiniKpi label="Produtos" value={String(props.data.catalogItems.length)} /><MiniKpi label="Prontos" value={String(ready)} /><MiniKpi label="Falta custo" value={String(missingCost)} /><MiniKpi label="Falta ficha" value={String(missingRecipe)} /></div>
+    {(missingCost + missingRecipe) > 0 && <div className="data-warning"><TriangleAlert size={19} /><div><strong>{missingCost + missingRecipe} cadastro(s) precisam de atenção</strong><span>O CMV só usa valores comprovados. Complete o custo ou a ficha técnica para aumentar a cobertura.</span></div></div>}
+    <div className="catalog-tabs" role="tablist" aria-label="Tipo de cadastro"><button type="button" role="tab" aria-selected={view === "products"} className={view === "products" ? "active" : ""} onClick={() => setView("products")}><PackageSearch size={16} /> Produtos <span>{props.data.catalogItems.length}</span></button><button type="button" role="tab" aria-selected={view === "ingredients"} className={view === "ingredients" ? "active" : ""} onClick={() => setView("ingredients")}><Boxes size={16} /> Ingredientes <span>{props.data.ingredients.length}</span></button></div>
+    <div className="module-toolbar catalog-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={view === "products" ? "Buscar produto, SKU, categoria ou área" : "Buscar ingrediente"} /></label>{view === "products" && <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} aria-label="Filtrar por status"><option value="all">Todos os status</option><option value="ready">Prontos</option><option value="cost">Falta custo</option><option value="recipe">Falta ficha técnica</option></select>}<span className="table-count">{rows.length} cadastro(s) · {linked} ligados à Zig</span></div>
+    <div className="data-table-card"><div className="responsive-table catalog-table"><div className="table-row table-header"><span>{view === "products" ? "Produto" : "Ingrediente"}</span><span>Categoria</span><span>{view === "products" ? "Tipo" : "Unidade"}</span><span>{view === "products" ? "Preço de venda" : "Uso"}</span><span>Custo vigente</span><span>Status</span><span></span></div>{rows.length ? rows.map((item) => { const cost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0); const status = view === "products" ? statusOf(item) : (cost > 0 ? "ready" : "cost"); return <div className="table-row" key={item.id}><strong>{item.name}<small className="sku-hint">{item.sku || (item.zig_product_id ? "Zig conectada" : "Cadastro manual")}</small></strong><span>{nested(item.categories)?.name ?? "Sem categoria"}</span><span>{view === "products" ? (item.costing_method === "recipe" ? "Preparado" : "Simples") : item.consumption_unit}</span><span>{view === "products" ? (item.sale_price === null ? "—" : MONEY.format(Number(item.sale_price))) : "Por ficha"}</span><strong>{cost > 0 ? MONEY.format(cost) : "—"}</strong><span className={`cost-badge ${status === "ready" ? "known" : "missing"}`}>{status === "ready" ? "Pronto" : status === "recipe" ? "Falta ficha" : "Falta custo"}</span><span className="row-actions"><button onClick={() => view === "products" ? setEditing(item) : setEditingIngredient(item)} aria-label={`Editar ${item.name}`}><Pencil size={15} /></button></span></div>; }) : <EmptyMini text={view === "products" ? "Nenhum produto encontrado." : "Nenhum ingrediente cadastrado. Use “Novo ingrediente” para começar uma ficha técnica."} />}</div></div>
+    {editing && <ProductEditorModal businessId={props.businessId} item={editing} data={props.data} onClose={() => setEditing(null)} onRefresh={props.onRefresh} />}
+    {editingIngredient && <IngredientModal businessId={props.businessId} item={editingIngredient === "new" ? null : editingIngredient} onClose={() => setEditingIngredient(null)} onSaved={async () => { await props.onRefresh(); setEditingIngredient(null); }} />}
   </section>;
 }
 
-function CostModal({ item, onClose, onSaved }: { item: CatalogItem; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [averageCost, setAverageCost] = useState(item.average_unit_cost === null ? "" : String(item.average_unit_cost));
-  const [latestCost, setLatestCost] = useState(item.latest_unit_cost === null ? "" : String(item.latest_unit_cost));
+type RecipeDraftItem = { ingredientId: string; quantity: string; waste: string };
+
+function costAt(item: CatalogItem, date: string, history: CostHistory[]) {
+  const version = history.find((row) => String(row.item_id) === String(item.id) && row.effective_from <= date);
+  return Number(version?.unit_cost ?? item.average_unit_cost ?? item.latest_unit_cost ?? 0);
+}
+
+function ProductEditorModal({ businessId, item, data, onClose, onRefresh }: { businessId: string; item: CatalogItem; data: DataState; onClose: () => void; onRefresh: () => Promise<void> }) {
+  const today = isoInSaoPaulo();
+  const currentRecipe = data.recipes.find((recipe) => String(recipe.product_id) === String(item.id) && recipe.effective_from <= today);
+  const currentComponents = currentRecipe ? data.recipeItems.filter((component) => String(component.recipe_id) === String(currentRecipe.id)) : [];
+  const [method, setMethod] = useState<"simple" | "recipe">(item.costing_method);
+  const [effectiveFrom, setEffectiveFrom] = useState(today);
+  const [unitCost, setUnitCost] = useState(item.average_unit_cost === null ? "" : String(item.average_unit_cost));
   const [salePrice, setSalePrice] = useState(item.sale_price === null ? "" : String(item.sale_price));
+  const [yieldQuantity, setYieldQuantity] = useState(currentRecipe ? String(currentRecipe.yield_quantity) : "1");
+  const [notes, setNotes] = useState(currentRecipe?.notes ?? "");
+  const [components, setComponents] = useState<RecipeDraftItem[]>(currentComponents.map((component) => ({ ingredientId: String(component.ingredient_id), quantity: String(component.quantity), waste: String(component.waste_percentage) })));
+  const [quickIngredient, setQuickIngredient] = useState({ name: "", unit: "ml", cost: "" });
+  const [showQuickIngredient, setShowQuickIngredient] = useState(false);
   const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
   function decimal(value: string) { const parsed = Number(value.replace(",", ".")); return value.trim() === "" ? null : parsed; }
-  async function save(event: React.FormEvent) { event.preventDefault(); const average = decimal(averageCost); const latest = decimal(latestCost); const price = decimal(salePrice); if ([average, latest, price].some((value) => value !== null && (!Number.isFinite(value) || value < 0))) return setMessage("Informe apenas valores positivos ou deixe o campo vazio."); setBusy(true); const { error } = await supabase.from("items").update({ average_unit_cost: average, latest_unit_cost: latest, sale_price: price, updated_at: new Date().toISOString() }).eq("id", item.id); if (error) { setMessage("Não foi possível atualizar os custos."); setBusy(false); return; } await onSaved(); }
-  return <div className="modal-backdrop"><form className="modal-card expense-modal" onSubmit={save}><button type="button" className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Cadastro central</p><h2>{item.name}</h2><p className="modal-description">O custo médio alimenta o CMV automático. Use o último custo como referência operacional quando necessário.</p><div className="form-grid"><label><span>Custo médio</span><input value={averageCost} onChange={(event) => setAverageCost(event.target.value)} inputMode="decimal" placeholder="0,00" autoFocus /></label><label><span>Último custo</span><input value={latestCost} onChange={(event) => setLatestCost(event.target.value)} inputMode="decimal" placeholder="0,00" /></label><label className="span-2"><span>Preço de venda</span><input value={salePrice} onChange={(event) => setSalePrice(event.target.value)} inputMode="decimal" placeholder="0,00" /></label></div>{message && <p className="modal-message">{message}</p>}<div className="modal-actions"><button type="button" className="modal-secondary" onClick={onClose}>Cancelar</button><button className="modal-primary" disabled={busy}>{busy ? "Salvando..." : "Salvar custos"}</button></div></form></div>;
+  const ingredientMap = new Map(data.ingredients.map((ingredient) => [String(ingredient.id), ingredient]));
+  const calculatedRecipeCost = components.reduce((total, component) => { const ingredient = ingredientMap.get(component.ingredientId); const quantity = decimal(component.quantity) ?? 0; const waste = decimal(component.waste) ?? 0; return total + (ingredient ? costAt(ingredient, effectiveFrom, data.costHistory) * quantity * (1 + waste / 100) : 0); }, 0) / Math.max(decimal(yieldQuantity) ?? 1, 1);
+  const history = data.costHistory.filter((row) => String(row.item_id) === String(item.id)).slice(0, 6);
+  function updateComponent(index: number, patch: Partial<RecipeDraftItem>) { setComponents((current) => current.map((component, componentIndex) => componentIndex === index ? { ...component, ...patch } : component)); }
+  function addComponent() { const used = new Set(components.map((component) => component.ingredientId)); const next = data.ingredients.find((ingredient) => !used.has(String(ingredient.id))); if (!next) return setMessage("Cadastre outro ingrediente para adicionar uma nova linha."); setComponents((current) => [...current, { ingredientId: String(next.id), quantity: "", waste: "0" }]); }
+  async function createQuickIngredient() {
+    const cost = decimal(quickIngredient.cost);
+    if (!quickIngredient.name.trim() || !quickIngredient.unit.trim() || cost === null || cost <= 0) return setMessage("Informe o nome, a unidade e um custo maior que zero para o ingrediente.");
+    setBusy(true); setMessage("");
+    const created = await supabase.from("items").insert({ business_id: Number(businessId), name: quickIngredient.name.trim(), item_type: "ingredient", consumption_unit: quickIngredient.unit.trim(), average_unit_cost: cost, latest_unit_cost: cost }).select("id").single();
+    if (created.error || !created.data) { setBusy(false); return setMessage("Não foi possível criar o ingrediente. Verifique se o nome já existe."); }
+    const saved = await supabase.rpc("save_item_cost_version", { p_business_id: Number(businessId), p_item_id: Number(created.data.id), p_unit_cost: cost, p_effective_from: effectiveFrom, p_sale_price: null });
+    if (saved.error) { setBusy(false); return setMessage("O ingrediente foi criado, mas o histórico de custo não pôde ser salvo. Tente editá-lo na lista de ingredientes."); }
+    setComponents((current) => [...current, { ingredientId: String(created.data.id), quantity: "", waste: "0" }]);
+    setQuickIngredient({ name: "", unit: "ml", cost: "" }); setShowQuickIngredient(false); await onRefresh(); setBusy(false);
+  }
+  async function save(event: React.FormEvent) {
+    event.preventDefault(); setMessage("");
+    const price = decimal(salePrice);
+    if (price !== null && (!Number.isFinite(price) || price < 0)) return setMessage("Informe um preço de venda válido.");
+    setBusy(true);
+    if (method === "simple") {
+      const cost = decimal(unitCost);
+      if (cost === null || !Number.isFinite(cost) || cost <= 0) { setBusy(false); return setMessage("Informe um custo unitário maior que zero."); }
+      const { error } = await supabase.rpc("save_item_cost_version", { p_business_id: Number(businessId), p_item_id: Number(item.id), p_unit_cost: cost, p_effective_from: effectiveFrom, p_sale_price: price });
+      if (error) { setBusy(false); return setMessage("Não foi possível salvar o custo. Revise os dados e tente novamente."); }
+    } else {
+      const yieldValue = decimal(yieldQuantity);
+      const payload = components.map((component) => ({ ingredient_id: Number(component.ingredientId), quantity: decimal(component.quantity), waste_percentage: decimal(component.waste) ?? 0 }));
+      if (!yieldValue || yieldValue <= 0 || !payload.length || payload.some((component) => !component.ingredient_id || !component.quantity || component.quantity <= 0)) { setBusy(false); return setMessage("Informe o rendimento e a quantidade de todos os ingredientes."); }
+      if (new Set(payload.map((component) => component.ingredient_id)).size !== payload.length) { setBusy(false); return setMessage("Remova ingredientes repetidos da ficha técnica."); }
+      const { error } = await supabase.rpc("save_product_recipe", { p_business_id: Number(businessId), p_product_id: Number(item.id), p_effective_from: effectiveFrom, p_yield_quantity: yieldValue, p_ingredients: payload, p_notes: notes, p_sale_price: price });
+      if (error) { setBusy(false); return setMessage(error.message.includes("custo") ? "Todos os ingredientes precisam ter custo válido na data escolhida." : "Não foi possível salvar a ficha técnica. Revise os ingredientes."); }
+    }
+    await onRefresh(); setBusy(false); onClose();
+  }
+  return <div className="modal-backdrop"><form className="modal-card product-editor" role="dialog" aria-modal="true" aria-labelledby={`product-editor-${item.id}`} onSubmit={save}><button type="button" className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Produto e ficha técnica</p><h2 id={`product-editor-${item.id}`}>{item.name}</h2><p className="modal-description">Escolha como o custo deste produto deve ser calculado. As vendas antigas continuarão usando o valor válido em cada data.</p>
+    <div className="cost-method-grid"><button type="button" className={method === "simple" ? "active" : ""} onClick={() => setMethod("simple")}><PackageSearch size={20} /><strong>Produto simples</strong><span>Um único custo por unidade, como cerveja ou refrigerante.</span></button><button type="button" className={method === "recipe" ? "active" : ""} onClick={() => setMethod("recipe")}><ChefHat size={20} /><strong>Produto preparado</strong><span>Soma ingredientes, como copões, drinks e porções.</span></button></div>
+    <div className="form-grid"><label><span>Aplicar o novo valor a partir de</span><input type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label><label><span>Preço de venda</span><input value={salePrice} onChange={(event) => setSalePrice(event.target.value)} inputMode="decimal" placeholder="0,00" /></label></div>
+    {method === "simple" ? <div className="simple-cost-panel"><label><span>Custo unitário vigente</span><input value={unitCost} onChange={(event) => setUnitCost(event.target.value)} inputMode="decimal" placeholder="0,00" autoFocus /></label><small>Use hoje para uma mudança normal. Escolha uma data anterior somente para corrigir o histórico.</small></div> : <div className="recipe-editor"><div className="recipe-summary"><div><span>Custo calculado por unidade</span><strong>{MONEY.format(calculatedRecipeCost)}</strong></div><label><span>Rendimento da ficha</span><input value={yieldQuantity} onChange={(event) => setYieldQuantity(event.target.value)} inputMode="decimal" /></label></div><div className="recipe-head"><div><strong>Ingredientes</strong><span>O custo usa a unidade de consumo de cada ingrediente.</span></div><button type="button" onClick={addComponent}><Plus size={15} /> Adicionar</button></div>{components.length ? <div className="recipe-lines">{components.map((component, index) => { const ingredient = ingredientMap.get(component.ingredientId); const subtotal = ingredient ? costAt(ingredient, effectiveFrom, data.costHistory) * (decimal(component.quantity) ?? 0) * (1 + (decimal(component.waste) ?? 0) / 100) : 0; return <div className="recipe-line" key={`${component.ingredientId}-${index}`}><label><span>Ingrediente</span><select value={component.ingredientId} onChange={(event) => updateComponent(index, { ingredientId: event.target.value })}>{data.ingredients.map((option) => <option key={option.id} value={option.id}>{option.name} · {option.consumption_unit}</option>)}</select></label><label><span>Quantidade</span><input value={component.quantity} onChange={(event) => updateComponent(index, { quantity: event.target.value })} inputMode="decimal" placeholder="0" /></label><label><span>Perda %</span><input value={component.waste} onChange={(event) => updateComponent(index, { waste: event.target.value })} inputMode="decimal" /></label><div><span>Subtotal</span><strong>{MONEY.format(subtotal)}</strong></div><button type="button" onClick={() => setComponents((current) => current.filter((_, componentIndex) => componentIndex !== index))} aria-label="Remover ingrediente"><Trash2 size={15} /></button></div>; })}</div> : <div className="recipe-empty"><ChefHat size={25} /><strong>Comece adicionando os ingredientes</strong><span>Exemplo: vodka, energético, gelo, copo e canudo.</span></div>}<button type="button" className="quick-ingredient-toggle" onClick={() => setShowQuickIngredient((current) => !current)}><Plus size={14} /> O ingrediente ainda não existe</button>{showQuickIngredient && <div className="quick-ingredient"><input value={quickIngredient.name} onChange={(event) => setQuickIngredient({ ...quickIngredient, name: event.target.value })} placeholder="Nome do ingrediente" /><select value={quickIngredient.unit} onChange={(event) => setQuickIngredient({ ...quickIngredient, unit: event.target.value })}><option value="ml">ml</option><option value="g">g</option><option value="un">unidade</option><option value="l">litro</option><option value="kg">kg</option></select><input value={quickIngredient.cost} onChange={(event) => setQuickIngredient({ ...quickIngredient, cost: event.target.value })} inputMode="decimal" placeholder="Custo por unidade" /><button type="button" onClick={createQuickIngredient} disabled={busy}>Criar</button></div>}<label className="recipe-notes"><span>Observação da ficha</span><input value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ex.: copão de 700 ml" /></label></div>}
+    {history.length > 0 && <details className="cost-history"><summary><Clock3 size={15} /> Ver histórico de custos ({history.length})</summary><div>{history.map((version) => <p key={version.id}><span>A partir de {dateLabel(version.effective_from)}<small>{version.source === "recipe" ? "Ficha técnica" : version.source === "import" ? "Valor importado" : "Alteração manual"}</small></span><strong>{MONEY.format(Number(version.unit_cost))}</strong></p>)}</div></details>}
+    {message && <p className="modal-message">{message}</p>}<div className="modal-actions"><button type="button" className="modal-secondary" onClick={onClose}>Cancelar</button><button className="modal-primary" disabled={busy}>{busy ? "Salvando..." : method === "recipe" ? "Salvar ficha técnica" : "Salvar custo"}</button></div></form></div>;
+}
+
+function IngredientModal({ businessId, item, onClose, onSaved }: { businessId: string; item: CatalogItem | null; onClose: () => void; onSaved: () => Promise<void> }) {
+  const [name, setName] = useState(item?.name ?? "");
+  const [unit, setUnit] = useState(item?.consumption_unit ?? "ml");
+  const [cost, setCost] = useState(item?.average_unit_cost === null || item?.average_unit_cost === undefined ? "" : String(item.average_unit_cost));
+  const [effectiveFrom, setEffectiveFrom] = useState(isoInSaoPaulo());
+  const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
+  async function save(event: React.FormEvent) {
+    event.preventDefault(); const parsedCost = Number(cost.replace(",", "."));
+    if (!name.trim() || !unit.trim() || !Number.isFinite(parsedCost) || parsedCost <= 0) return setMessage("Informe nome, unidade e custo maior que zero.");
+    setBusy(true); setMessage(""); let itemId = item?.id;
+    if (item) {
+      const updated = await supabase.from("items").update({ name: name.trim(), consumption_unit: unit.trim() }).eq("id", item.id).eq("business_id", businessId);
+      if (updated.error) { setBusy(false); return setMessage("Não foi possível atualizar o ingrediente."); }
+    } else {
+      const created = await supabase.from("items").insert({ business_id: Number(businessId), name: name.trim(), item_type: "ingredient", consumption_unit: unit.trim(), average_unit_cost: parsedCost, latest_unit_cost: parsedCost }).select("id").single();
+      if (created.error || !created.data) { setBusy(false); return setMessage("Não foi possível criar o ingrediente. Verifique se o nome já existe."); }
+      itemId = String(created.data.id);
+    }
+    const saved = await supabase.rpc("save_item_cost_version", { p_business_id: Number(businessId), p_item_id: Number(itemId), p_unit_cost: parsedCost, p_effective_from: effectiveFrom, p_sale_price: null });
+    if (saved.error) { setBusy(false); return setMessage("O cadastro foi salvo, mas o histórico de custo falhou. Tente novamente."); }
+    await onSaved();
+  }
+  return <div className="modal-backdrop"><form className="modal-card ingredient-modal" role="dialog" aria-modal="true" aria-labelledby="ingredient-editor-title" onSubmit={save}><button type="button" className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Ingrediente</p><h2 id="ingredient-editor-title">{item ? `Editar ${item.name}` : "Novo ingrediente"}</h2><p className="modal-description">Cadastre o custo na unidade usada na receita. Exemplo: vodka em ml e limão por unidade.</p><div className="form-grid"><label className="span-2"><span>Nome</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="Ex.: Vodka" autoFocus /></label><label><span>Unidade de consumo</span><select value={unit} onChange={(event) => setUnit(event.target.value)}><option value="ml">ml</option><option value="g">g</option><option value="un">unidade</option><option value="l">litro</option><option value="kg">kg</option></select></label><label><span>Custo por {unit}</span><input value={cost} onChange={(event) => setCost(event.target.value)} inputMode="decimal" placeholder="0,00" /></label><label className="span-2"><span>Aplicar a partir de</span><input type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label></div>{message && <p className="modal-message">{message}</p>}<div className="modal-actions"><button type="button" className="modal-secondary" onClick={onClose}>Cancelar</button><button className="modal-primary" disabled={busy}>{busy ? "Salvando..." : "Salvar ingrediente"}</button></div></form></div>;
 }
 
 function PlanningPage(props: Parameters<typeof SectionContent>[0]) {
@@ -419,7 +540,7 @@ function ExpenseModal({ businessId, userId, expense, onClose, onSaved }: { busin
 
 function PaymentBars({ payments, sales }: { payments: PaymentMethod[]; sales: Sale[] }) { const imports = new Set(sales.map((sale) => String(sale.import_id))); const rows = payments.filter((payment) => imports.has(String(payment.import_id))).sort((a, b) => b.amount - a.amount); const max = Math.max(...rows.map((row) => Number(row.amount)), 1); return rows.length ? <div className="bar-list">{rows.map((row) => <div key={row.id}><span>{row.payment_method}</span><div><i style={{ width: `${Number(row.amount) / max * 100}%` }} /></div><strong>{MONEY.format(row.amount)}</strong></div>)}</div> : <EmptyMini text="Sem formas de pagamento no período." />; }
 function CoverageBar({ known, missing }: { known: number; missing: number }) { const total = known + missing; const percentage = total ? known / total * 100 : 0; return <div className="coverage-panel"><div className="coverage-track"><i style={{ width: `${percentage}%` }} /></div><div className="coverage-legend"><span><i className="known-dot" />Com custo <strong>{MONEY.format(known)}</strong></span><span><i className="missing-dot" />Sem custo <strong>{MONEY.format(missing)}</strong></span></div></div>; }
-function AbcSummary({ rows }: { rows: AbcItem[] }) { if (!rows.length) return <EmptyMini text="Importe uma Curva ABC para ver a concentração por classe." />; const groups = (["A", "B", "C"] as const).map((classification) => ({ classification, count: rows.filter((row) => row.classification === classification).length, value: rows.filter((row) => row.classification === classification).reduce((sum, row) => sum + Number(row.total_value), 0) })); return <div className="abc-summary">{groups.map((group) => <div key={group.classification}><b className={`abc-class class-${group.classification.toLowerCase()}`}>{group.classification}</b><span>{group.count} item(ns)</span><strong>{MONEY.format(group.value)}</strong></div>)}</div>; }
+function AbcSummary({ rows }: { rows: { classification: "A" | "B" | "C"; total_value: number }[] }) { if (!rows.length) return <EmptyMini text="Sem vendas suficientes para calcular a Curva ABC." />; const groups = (["A", "B", "C"] as const).map((classification) => ({ classification, count: rows.filter((row) => row.classification === classification).length, value: rows.filter((row) => row.classification === classification).reduce((sum, row) => sum + Number(row.total_value), 0) })); return <div className="abc-summary">{groups.map((group) => <div key={group.classification}><b className={`abc-class class-${group.classification.toLowerCase()}`}>{group.classification}</b><span>{group.count} item(ns)</span><strong>{MONEY.format(group.value)}</strong></div>)}</div>; }
 function Ranking({ rows }: { rows: { name: string; net: number; quantity: number }[] }) { return rows.length ? <div className="ranking-list">{rows.map((row, index) => <div key={row.name}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{row.name}</strong><small>{NUMBER.format(row.quantity)} unidades</small></div><b>{MONEY.format(row.net)}</b></div>)}</div> : <EmptyMini text="Sem produtos no período." />; }
 function ComparisonBars({ revenue, expenses }: { revenue: number; expenses: number }) { const max = Math.max(revenue, expenses, 1); return <div className="comparison-chart"><div><span>Receita</span><i style={{ height: `${Math.max(revenue / max * 100, 3)}%` }} className="revenue-bar" /><strong>{MONEY.format(revenue)}</strong></div><div><span>Despesas</span><i style={{ height: `${Math.max(expenses / max * 100, 3)}%` }} className="expense-bar" /><strong>{MONEY.format(expenses)}</strong></div></div>; }
 function MiniKpi({ label, value }: { label: string; value: string }) { return <article><span>{label}</span><strong>{value}</strong></article>; }
