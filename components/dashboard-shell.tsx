@@ -29,7 +29,8 @@ type PaymentMethod = { id: string; import_id: string; payment_method: string; am
 type Expense = { id: string; area_id: string | null; category: string; description: string; expense_date: string; due_date: string | null; paid_at: string | null; amount: number; payment_method: string | null; status: "draft" | "pending" | "completed" | "cancelled"; is_recurring: boolean; cost_behavior: "fixed" | "variable"; areas: { name: string } | { name: string }[] | null };
 type ImportRow = { id: string; file_name: string; period_start: string | null; period_end: string | null; row_count: number; status: string; created_at: string };
 type Area = { id: string; name: string };
-type CatalogItem = { id: string; name: string; sku: string | null; item_type: "ingredient" | "product" | "consumable"; consumption_unit: string; costing_method: "simple" | "recipe"; sale_price: number | null; latest_unit_cost: number | null; average_unit_cost: number | null; minimum_stock: number; is_active: boolean; zig_product_id: string | null; categories: { name: string } | { name: string }[] | null; areas: { name: string } | { name: string }[] | null };
+type ProductSectorKey = "bar" | "drinks" | "cozinha" | "churrasqueira";
+type CatalogItem = { id: string; area_id: string | null; name: string; sku: string | null; item_type: "ingredient" | "product" | "consumable"; consumption_unit: string; costing_method: "simple" | "recipe"; sale_price: number | null; latest_unit_cost: number | null; average_unit_cost: number | null; minimum_stock: number; is_active: boolean; zig_product_id: string | null; categories: { name: string } | { name: string }[] | null; areas: { id: string; name: string } | { id: string; name: string }[] | null };
 type CostHistory = { id: string; item_id: string; unit_cost: number; effective_from: string; source: "manual" | "recipe" | "import" | "purchase"; created_at: string };
 type Recipe = { id: string; product_id: string; yield_quantity: number; notes: string | null; effective_from: string; created_at: string };
 type RecipeItem = { id: string; recipe_id: string; ingredient_id: string; quantity: number; waste_percentage: number };
@@ -58,6 +59,12 @@ const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const NUMBER = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const DATE = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
+const PRODUCT_SECTORS: { key: ProductSectorKey; label: string }[] = [
+  { key: "bar", label: "Bar" },
+  { key: "drinks", label: "Drinks" },
+  { key: "cozinha", label: "Cozinha" },
+  { key: "churrasqueira", label: "Churrasqueira" },
+];
 const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: "visao-geral", label: "Visão geral", icon: <LayoutDashboard size={19} /> },
   { id: "vendas", label: "Vendas", icon: <TrendingUp size={19} /> },
@@ -71,6 +78,14 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
 ];
 
 function nested<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
+function productSectorKey(areaName: string | null | undefined): ProductSectorKey | null {
+  const normalized = areaName?.trim().toLocaleLowerCase("pt-BR");
+  if (normalized === "bar" || normalized === "cerveja") return "bar";
+  if (normalized === "drinks") return "drinks";
+  if (normalized === "cozinha") return "cozinha";
+  if (normalized === "churrasqueira") return "churrasqueira";
+  return null;
+}
 function dateLabel(value: string | null) { return value ? DATE.format(new Date(`${value}T00:00:00Z`)) : "—"; }
 function isoInSaoPaulo(date = new Date()) { const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date); const value = Object.fromEntries(parts.map((part) => [part.type, part.value])); return `${value.year}-${value.month}-${value.day}`; }
 function shiftDate(date: string, days: number) { const value = new Date(`${date}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10); }
@@ -104,7 +119,7 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
   const [sales, expenses, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig, previousZig, sectorProfitability, costHistory, recipes] = await Promise.all([
     supabase.from("sales").select("id,import_id,period_start,period_end,business_date,gross_amount,discount_amount,product_gross_amount,service_amount,revenue_amount,closing_net_amount,open_accounts_amount,recharge_balance_amount,sales_imports(file_name,row_count,created_at)").eq("business_id", businessId).order("business_date", { ascending: false }),
     supabase.from("expenses").select("id,area_id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring,cost_behavior,areas(name)").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
-    supabase.from("items").select("id,name,sku,item_type,consumption_unit,costing_method,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(name)").eq("business_id", businessId).order("name"),
+    supabase.from("items").select("id,area_id,name,sku,item_type,consumption_unit,costing_method,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(id,name)").eq("business_id", businessId).order("name"),
     supabase.from("suppliers").select("id", { count: "exact", head: true }).eq("business_id", businessId),
     supabase.from("areas").select("id,name").eq("business_id", businessId).eq("is_active", true).order("sort_order"),
     supabase.from("forecasts").select("id,area_id,forecast_type,period_start,period_end,amount,notes,areas(name)").eq("business_id", businessId).order("period_start", { ascending: false }),
@@ -486,6 +501,11 @@ function CatalogPage(props: Parameters<typeof SectionContent>[0]) {
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"products" | "ingredients">("products");
   const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "cost" | "recipe">("all");
+  const [sectorFilter, setSectorFilter] = useState<"all" | "unassigned" | ProductSectorKey>("all");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkSector, setBulkSector] = useState<"unassigned" | ProductSectorKey>("bar");
+  const [assigningSector, setAssigningSector] = useState(false);
+  const [assignmentMessage, setAssignmentMessage] = useState("");
   const currentRecipes = new Map<string, Recipe>();
   props.data.recipes.filter((recipe) => recipe.effective_from <= isoInSaoPaulo()).forEach((recipe) => { if (!currentRecipes.has(String(recipe.product_id))) currentRecipes.set(String(recipe.product_id), recipe); });
   const recipeWithItems = new Set(props.data.recipeItems.map((component) => String(component.recipe_id)));
@@ -500,18 +520,45 @@ function CatalogPage(props: Parameters<typeof SectionContent>[0]) {
   const source = view === "products" ? props.data.catalogItems : props.data.ingredients;
   const rows = source.filter((item) => {
     const matchesQuery = `${item.name} ${item.sku ?? ""} ${nested(item.categories)?.name ?? ""} ${nested(item.areas)?.name ?? ""}`.toLowerCase().includes(query.toLowerCase());
-    return matchesQuery && (view === "ingredients" || statusFilter === "all" || statusOf(item) === statusFilter);
+    const sector = productSectorKey(nested(item.areas)?.name);
+    const matchesSector = view === "ingredients" || sectorFilter === "all" || (sectorFilter === "unassigned" ? sector === null : sector === sectorFilter);
+    return matchesQuery && matchesSector && (view === "ingredients" || statusFilter === "all" || statusOf(item) === statusFilter);
   });
-  const ready = props.data.catalogItems.filter((item) => statusOf(item) === "ready").length;
   const missingCost = props.data.catalogItems.filter((item) => statusOf(item) === "cost").length;
   const missingRecipe = props.data.catalogItems.filter((item) => statusOf(item) === "recipe").length;
   const linked = props.data.catalogItems.filter((item) => item.zig_product_id).length;
-  return <section><ModuleHero eyebrow="Base central" title="Produtos e fichas técnicas" description="Cadastre custos simples ou monte receitas para copões, drinks e porções." action="Novo ingrediente" icon={<ClipboardList size={22} />} onAction={() => setEditingIngredient("new")} />
-    <div className="section-kpis"><MiniKpi label="Produtos" value={String(props.data.catalogItems.length)} /><MiniKpi label="Prontos" value={String(ready)} /><MiniKpi label="Falta custo" value={String(missingCost)} /><MiniKpi label="Falta ficha" value={String(missingRecipe)} /></div>
+  const missingSector = props.data.catalogItems.filter((item) => productSectorKey(nested(item.areas)?.name) === null).length;
+  const sectorAreas = PRODUCT_SECTORS.flatMap((sector) => {
+    const area = props.data.areas.find((candidate) => productSectorKey(candidate.name) === sector.key);
+    return area ? [{ ...sector, areaId: area.id }] : [];
+  });
+  async function assignSector(itemIds: string[], sector: "unassigned" | ProductSectorKey) {
+    if (!itemIds.length || assigningSector) return;
+    const areaId = sector === "unassigned" ? null : sectorAreas.find((option) => option.key === sector)?.areaId;
+    if (sector !== "unassigned" && !areaId) return setAssignmentMessage("O setor escolhido ainda não está disponível no cadastro de áreas.");
+    setAssigningSector(true); setAssignmentMessage("");
+    const { error } = await supabase.rpc("assign_products_to_sector", { p_business_id: Number(props.businessId), p_item_ids: itemIds.map(Number), p_area_id: areaId ? Number(areaId) : null });
+    if (error) { setAssignmentMessage("Não foi possível salvar o setor. Tente novamente."); setAssigningSector(false); return; }
+    await props.onRefresh();
+    setSelectedIds(new Set()); setAssignmentMessage(`${itemIds.length} produto(s) classificados com sucesso.`); setAssigningSector(false);
+  }
+  function toggleSelected(itemId: string, checked: boolean) {
+    setSelectedIds((current) => { const next = new Set(current); if (checked) next.add(itemId); else next.delete(itemId); return next; });
+  }
+  function toggleVisible(checked: boolean) {
+    setSelectedIds((current) => { const next = new Set(current); rows.forEach((item) => checked ? next.add(String(item.id)) : next.delete(String(item.id))); return next; });
+  }
+  return <section><ModuleHero eyebrow="Base central" title="Produtos e fichas técnicas" description="Classifique os produtos reais da Zig por setor e mantenha custos e fichas técnicas no mesmo cadastro." action="Novo ingrediente" icon={<ClipboardList size={22} />} onAction={() => setEditingIngredient("new")} />
+    <div className="section-kpis catalog-kpis"><MiniKpi label="Produtos" value={String(props.data.catalogItems.length)} /><MiniKpi label="Ligados à Zig" value={String(linked)} /><MiniKpi label="Sem setor" value={String(missingSector)} /><MiniKpi label="Falta custo" value={String(missingCost)} /><MiniKpi label="Falta ficha" value={String(missingRecipe)} /></div>
+    {missingSector > 0 && <div className="data-warning sector-classification-warning"><TriangleAlert size={19} /><div><strong>{missingSector} produto(s) ainda estão sem setor</strong><span>Classifique-os como Bar, Drinks, Cozinha ou Churrasqueira para tornar as análises de vendas, CMV e rentabilidade mais confiáveis.</span></div><button type="button" onClick={() => { setView("products"); setSectorFilter("unassigned"); }}>Ver pendentes</button></div>}
     {(missingCost + missingRecipe) > 0 && <div className="data-warning"><TriangleAlert size={19} /><div><strong>{missingCost + missingRecipe} cadastro(s) precisam de atenção</strong><span>O CMV só usa valores comprovados. Complete o custo ou a ficha técnica para aumentar a cobertura.</span></div></div>}
-    <div className="catalog-tabs" role="tablist" aria-label="Tipo de cadastro"><button type="button" role="tab" aria-selected={view === "products"} className={view === "products" ? "active" : ""} onClick={() => setView("products")}><PackageSearch size={16} /> Produtos <span>{props.data.catalogItems.length}</span></button><button type="button" role="tab" aria-selected={view === "ingredients"} className={view === "ingredients" ? "active" : ""} onClick={() => setView("ingredients")}><Boxes size={16} /> Ingredientes <span>{props.data.ingredients.length}</span></button></div>
-    <div className="module-toolbar catalog-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={view === "products" ? "Buscar produto, SKU, categoria ou área" : "Buscar ingrediente"} /></label>{view === "products" && <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} aria-label="Filtrar por status"><option value="all">Todos os status</option><option value="ready">Prontos</option><option value="cost">Falta custo</option><option value="recipe">Falta ficha técnica</option></select>}<span className="table-count">{rows.length} cadastro(s) · {linked} ligados à Zig</span></div>
-    <div className="data-table-card"><div className="responsive-table catalog-table"><div className="table-row table-header"><span>{view === "products" ? "Produto" : "Ingrediente"}</span><span>Categoria</span><span>{view === "products" ? "Tipo" : "Unidade"}</span><span>{view === "products" ? "Preço de venda" : "Uso"}</span><span>Custo vigente</span><span>Status</span><span></span></div>{rows.length ? rows.map((item) => { const cost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0); const status = view === "products" ? statusOf(item) : (cost > 0 ? "ready" : "cost"); return <div className="table-row" key={item.id}><strong>{item.name}<small className="sku-hint">{item.sku || (item.zig_product_id ? "Zig conectada" : "Cadastro manual")}</small></strong><span>{nested(item.categories)?.name ?? "Sem categoria"}</span><span>{view === "products" ? (item.costing_method === "recipe" ? "Preparado" : "Simples") : item.consumption_unit}</span><span>{view === "products" ? (item.sale_price === null ? "—" : MONEY.format(Number(item.sale_price))) : "Por ficha"}</span><strong>{cost > 0 ? MONEY.format(cost) : "—"}</strong><span className={`cost-badge ${status === "ready" ? "known" : "missing"}`}>{status === "ready" ? "Pronto" : status === "recipe" ? "Falta ficha" : "Falta custo"}</span><span className="row-actions"><button onClick={() => view === "products" ? setEditing(item) : setEditingIngredient(item)} aria-label={`Editar ${item.name}`}><Pencil size={15} /></button></span></div>; }) : <EmptyMini text={view === "products" ? "Nenhum produto encontrado." : "Nenhum ingrediente cadastrado. Use “Novo ingrediente” para começar uma ficha técnica."} />}</div></div>
+    <div className="catalog-tabs" role="tablist" aria-label="Tipo de cadastro"><button type="button" role="tab" aria-selected={view === "products"} className={view === "products" ? "active" : ""} onClick={() => setView("products")}><PackageSearch size={16} /> Produtos <span>{props.data.catalogItems.length}</span></button><button type="button" role="tab" aria-selected={view === "ingredients"} className={view === "ingredients" ? "active" : ""} onClick={() => { setView("ingredients"); setSelectedIds(new Set()); }}><Boxes size={16} /> Ingredientes <span>{props.data.ingredients.length}</span></button></div>
+    <div className="module-toolbar catalog-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={view === "products" ? "Buscar produto, SKU, categoria ou setor" : "Buscar ingrediente"} /></label>{view === "products" && <><select value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value as typeof sectorFilter)} aria-label="Filtrar por setor"><option value="all">Todos os setores</option><option value="unassigned">Sem setor ({missingSector})</option>{PRODUCT_SECTORS.map((sector) => <option key={sector.key} value={sector.key}>{sector.label}</option>)}</select><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} aria-label="Filtrar por status"><option value="all">Todos os status</option><option value="ready">Prontos</option><option value="cost">Falta custo</option><option value="recipe">Falta ficha técnica</option></select></>}<span className="table-count">{rows.length} cadastro(s)</span></div>
+    {view === "products" && selectedIds.size > 0 && <div className="bulk-sector-bar"><div><strong>{selectedIds.size} produto(s) selecionados</strong><span>Escolha um setor para aplicar a todos de uma vez.</span></div><select value={bulkSector} onChange={(event) => setBulkSector(event.target.value as typeof bulkSector)} aria-label="Setor para classificação em massa"><option value="unassigned">Sem setor</option>{sectorAreas.map((sector) => <option key={sector.key} value={sector.key}>{sector.label}</option>)}</select><button type="button" disabled={assigningSector} onClick={() => assignSector([...selectedIds], bulkSector)}>{assigningSector ? "Salvando..." : "Aplicar setor"}</button><button type="button" className="bulk-clear" onClick={() => setSelectedIds(new Set())}>Limpar seleção</button></div>}
+    {assignmentMessage && <p className="catalog-assignment-message" role="status">{assignmentMessage}</p>}
+    <div className="data-table-card"><div className={`responsive-table catalog-table ${view === "products" ? "catalog-products-table" : "catalog-ingredients-table"}`}>
+      {view === "products" ? <><div className="table-row table-header"><label className="catalog-check"><input type="checkbox" checked={rows.length > 0 && rows.every((item) => selectedIds.has(String(item.id)))} onChange={(event) => toggleVisible(event.target.checked)} aria-label="Selecionar todos os produtos visíveis" /></label><span>Produto</span><span>Categoria</span><span>Setor</span><span>Tipo</span><span>Preço</span><span>Custo</span><span>Status</span><span></span></div>{rows.length ? rows.map((item) => { const cost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0); const status = statusOf(item); const sector = productSectorKey(nested(item.areas)?.name); return <div className="table-row" key={item.id}><label className="catalog-check"><input type="checkbox" checked={selectedIds.has(String(item.id))} onChange={(event) => toggleSelected(String(item.id), event.target.checked)} aria-label={`Selecionar ${item.name}`} /></label><strong>{item.name}<small className="sku-hint">{item.sku || (item.zig_product_id ? "Zig conectada" : "Cadastro manual")}</small></strong><span>{nested(item.categories)?.name ?? "Sem categoria"}</span><select className={`product-sector-select ${sector ? "assigned" : "unassigned"}`} value={sector ?? "unassigned"} disabled={assigningSector} onChange={(event) => assignSector([String(item.id)], event.target.value as "unassigned" | ProductSectorKey)} aria-label={`Setor de ${item.name}`}><option value="unassigned">Sem setor</option>{sectorAreas.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select><span>{item.costing_method === "recipe" ? "Preparado" : "Simples"}</span><span>{item.sale_price === null ? "—" : MONEY.format(Number(item.sale_price))}</span><strong>{cost > 0 ? MONEY.format(cost) : "—"}</strong><span className={`cost-badge ${status === "ready" ? "known" : "missing"}`}>{status === "ready" ? "Pronto" : status === "recipe" ? "Falta ficha" : "Falta custo"}</span><span className="row-actions"><button onClick={() => setEditing(item)} aria-label={`Editar ${item.name}`}><Pencil size={15} /></button></span></div>; }) : <EmptyMini text="Nenhum produto encontrado." />}</> : <><div className="table-row table-header"><span>Ingrediente</span><span>Categoria</span><span>Unidade</span><span>Uso</span><span>Custo vigente</span><span>Status</span><span></span></div>{rows.length ? rows.map((item) => { const cost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0); return <div className="table-row" key={item.id}><strong>{item.name}<small className="sku-hint">{item.sku || "Cadastro manual"}</small></strong><span>{nested(item.categories)?.name ?? "Sem categoria"}</span><span>{item.consumption_unit}</span><span>Por ficha</span><strong>{cost > 0 ? MONEY.format(cost) : "—"}</strong><span className={`cost-badge ${cost > 0 ? "known" : "missing"}`}>{cost > 0 ? "Pronto" : "Falta custo"}</span><span className="row-actions"><button onClick={() => setEditingIngredient(item)} aria-label={`Editar ${item.name}`}><Pencil size={15} /></button></span></div>; }) : <EmptyMini text="Nenhum ingrediente cadastrado. Use “Novo ingrediente” para começar uma ficha técnica." />}</>}
+    </div></div>
     {editing && <ProductEditorModal businessId={props.businessId} item={editing} data={props.data} onClose={() => setEditing(null)} onRefresh={props.onRefresh} />}
     {editingIngredient && <IngredientModal businessId={props.businessId} item={editingIngredient === "new" ? null : editingIngredient} onClose={() => setEditingIngredient(null)} onSaved={async () => { await props.onRefresh(); setEditingIngredient(null); }} />}
   </section>;
