@@ -313,7 +313,7 @@ function Overview({ sales, expenses, data, setSection, range }: Parameters<typeo
   const previousLabel = `${dateLabel(previousRange.start)} a ${dateLabel(previousRange.end)}`;
 
   return <section className="overview-page finance-dashboard">
-    <div className="overview-intro finance-intro"><div><p className="page-kicker">Dashboard financeira</p><h2>Como está o caixa do Dopamina?</h2><span>{periodLabel} · comparação com {previousLabel}</span></div><button className="accent-button" onClick={() => setSection("vendas")}><FileUp size={17} /> Sincronizar com a Zig</button></div>
+    <div className="overview-intro finance-intro"><div><p className="page-kicker">Dashboard financeira</p><h2>Dashboard</h2><span>{periodLabel} · comparação com {previousLabel}</span></div><button className="accent-button" onClick={() => setSection("vendas")}><FileUp size={17} /> Sincronizar com a Zig</button></div>
     <div className="finance-source-note"><CheckCircle2 size={17} /><span>{zigConnected ? "Faturamento real da Zig" : sales.length ? "Faturamento do relatório importado" : "Nenhum faturamento encontrado"}</span><i /> <span>Despesas reais cadastradas no ERP</span></div>
 
     <div className="finance-metric-grid">
