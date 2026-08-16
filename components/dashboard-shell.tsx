@@ -7,7 +7,7 @@ import {
   ArrowDownRight, ArrowUpRight, BarChart3, Boxes, CalendarRange,
   CheckCircle2, ChefHat, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, FileBarChart2, FileSpreadsheet,
   FileUp, LayoutDashboard, LogOut, Menu, PackageSearch, Pencil,
-  Plus, ReceiptText, Search, Settings, ShoppingBasket, ShoppingCart, Trash2, TrendingUp, TriangleAlert,
+  Plus, ReceiptText, Search, Settings, ShoppingBasket, ShoppingCart, Sparkles, Trash2, TrendingUp, TriangleAlert,
   UsersRound, WalletCards, X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -22,7 +22,7 @@ import {
   type ZigProfitabilityPayload,
 } from "@/lib/zig-analytics-import";
 
-type Section = "visao-geral" | "dre" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" |
+type Section = "visao-geral" | "dre" | "insights" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" |
   "planejamento" | "cadastros" | "importacoes" | "configuracoes";
 type Membership = { business_id: string; role: "owner" | "manager"; status: "active" | "pending" | "suspended"; businesses: { name: string } | { name: string }[] | null };
 type Profile = { full_name: string; email: string };
@@ -80,6 +80,7 @@ const PRODUCT_SECTORS: { key: ProductSectorKey; label: string }[] = [
 ];
 const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: "visao-geral", label: "Visão geral", icon: <LayoutDashboard size={19} /> },
+  { id: "insights", label: "Insights", icon: <Sparkles size={19} /> },
   { id: "dre", label: "DRE", icon: <FileBarChart2 size={19} /> },
   { id: "vendas", label: "Vendas", icon: <TrendingUp size={19} /> },
   { id: "cmv", label: "CMV", icon: <BarChart3 size={19} /> },
@@ -241,7 +242,7 @@ export function DashboardShell() {
     {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu" />}
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
       <div className="sidebar-brand"><div className="sidebar-logo"><Image src="/dopamina-logo.png" alt="Dopamina" width={54} height={50} unoptimized /></div><button className="close-sidebar-mobile" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X size={20} /></button></div>
-      <nav className="sidebar-nav" aria-label="Navegação principal"><span className="nav-caption">Principal</span>{NAV_ITEMS.slice(0, 10).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}<span className="nav-caption nav-caption-space">Sistema</span>{NAV_ITEMS.slice(10).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}</nav>
+      <nav className="sidebar-nav" aria-label="Navegação principal"><span className="nav-caption">Principal</span>{NAV_ITEMS.slice(0, 11).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}<span className="nav-caption nav-caption-space">Sistema</span>{NAV_ITEMS.slice(11).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}</nav>
       <div className="sidebar-footer"><button className="user-menu" title={profile?.full_name ?? "Usuário"}><span className="user-avatar">{(profile?.full_name ?? "D").charAt(0).toUpperCase()}</span><span className="user-copy"><strong>{profile?.full_name ?? "Usuário"}</strong><small>{membership.role === "owner" ? "Proprietário" : "Gerência"}</small></span></button><button className="logout-button" onClick={signOut} aria-label="Sair"><LogOut size={18} /></button></div>
       <button className="compact-toggle" onClick={() => setSidebarCompact((current) => !current)} aria-label={sidebarCompact ? "Expandir menu" : "Recolher menu"}>{sidebarCompact ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}</button>
     </aside>
@@ -254,6 +255,7 @@ export function DashboardShell() {
 function SectionContent(props: { section: Section; setSection: (section: Section) => void; businessId: string; userId: string; data: DataState; sales: Sale[]; saleItems: SaleItem[]; expenses: Expense[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; range: DateRange; refreshing: boolean; onRefresh: () => Promise<void> }) {
   if (props.section === "visao-geral") return <Overview {...props} />;
   if (props.section === "dre") return <DrePage {...props} />;
+  if (props.section === "insights") return <InsightsPage {...props} />;
   if (props.section === "vendas") return <SalesPage {...props} />;
   if (props.section === "cmv") return <CmvPage {...props} />;
   if (props.section === "despesas") return <ExpensesPage {...props} />;
@@ -265,7 +267,7 @@ function SectionContent(props: { section: Section; setSection: (section: Section
   if (props.section === "planejamento") return <PlanningPage {...props} />;
   if (props.section === "cadastros") return <CatalogPage {...props} />;
   if (props.section === "importacoes") return <ImportsPage {...props} />;
-  const content: Record<Exclude<Section, "visao-geral" | "dre" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" | "planejamento" | "cadastros" | "importacoes">, { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; columns: string[] }> = {
+  const content: Record<Exclude<Section, "visao-geral" | "dre" | "insights" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" | "planejamento" | "cadastros" | "importacoes">, { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; columns: string[] }> = {
     configuracoes: { eyebrow: "Administração", title: "Configurações e acessos", description: "Gerencie usuários, dados do negócio e histórico de alterações.", action: "Convidar usuário", icon: <UsersRound size={19} />, columns: ["Usuário", "E-mail", "Perfil", "Status", "Último acesso"] },
   };
   const current = content[props.section];
@@ -340,6 +342,7 @@ function Overview({ sales, expenses, data, setSection, range }: Parameters<typeo
         <div className={`break-even-status ${!breakEvenKnown ? "unknown" : breakEvenReached ? "reached" : "pending"}`}>{!breakEvenKnown ? <TriangleAlert size={21} /> : breakEvenReached ? <CheckCircle2 size={21} /> : <Clock3 size={21} />}<div><strong>{!breakEvenKnown ? "Ponto de equilíbrio ainda não confiável" : breakEvenReached ? "Ponto de equilíbrio atingido" : "Ponto de equilíbrio ainda não atingido"}</strong><span>{!breakEvenKnown ? "Não há despesas lançadas para este dia. Cadastre os custos para avaliar." : breakEvenReached ? `O faturamento superou os custos registrados em ${MONEY.format(day.revenue - day.expenses)}.` : `Ainda faltam ${MONEY.format(day.expenses - day.revenue)} em faturamento para cobrir os custos.`}</span></div>{!breakEvenKnown && <button type="button" onClick={() => setSection("despesas")}>Cadastrar despesas</button>}</div>
       </article>
     </div>
+    <AttentionPanel data={data} range={range} />
     <p className="finance-data-note"><TriangleAlert size={15} /> Resultado e margem são operacionais e estimados: consideram faturamento menos despesas cadastradas, sem incluir CMV nesta etapa. Custos não lançados no ERP não aparecem no cálculo.</p>
   </section>;
 }
@@ -373,6 +376,23 @@ function computeDreSummary(zig: ZigDashboard, catalogItems: CatalogItem[], allEx
 }
 function pctChange(current: number | null, previous: number | null) { if (current === null || previous === null || previous === 0) return null; return (current - previous) / Math.abs(previous); }
 
+type SectorResult = { name: SectorName; revenue: number; share: number; knownRevenue: number; cmv: number; grossProfit: number; pessoal: number; opex: number; result: number; margin: number | null };
+function computeSectorResults(sourceProducts: SectorProduct[], expenses: Expense[], range: DateRange): SectorResult[] {
+  const totalRevenue = sourceProducts.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
+  return SECTOR_NAMES.map((name) => {
+    const products = sourceProducts.filter((product) => product.sector === name);
+    const revenue = products.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
+    const knownRevenue = products.reduce((sum, product) => sum + Number(product.known_revenue_cents) / 100, 0);
+    const cmv = products.reduce((sum, product) => sum + Number(product.known_cmv ?? 0), 0);
+    const grossProfit = knownRevenue - cmv;
+    const sectorExpenses = expenses.filter((expense) => sectorNameForSource(nested(expense.areas)?.name) === name);
+    const pessoal = sectorExpenses.filter((expense) => expense.source_type === "work_shift" || expense.source_type === "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
+    const opex = sectorExpenses.filter((expense) => expense.source_type !== "work_shift" && expense.source_type !== "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
+    const result = grossProfit - pessoal - opex;
+    return { name, revenue, share: totalRevenue > 0 ? revenue / totalRevenue : 0, knownRevenue, cmv, grossProfit, pessoal, opex, result, margin: knownRevenue > 0 ? result / knownRevenue : null };
+  });
+}
+
 function DrePage(props: Parameters<typeof SectionContent>[0]) {
   const range = props.range;
   const previousRange = previousEquivalentRange(range);
@@ -393,22 +413,7 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
   const resultChange = pctChange(current.operatingResult, previous.operatingResult);
   const pessoalChange = pctChange(current.pessoal, previous.pessoal);
 
-  const sectorResults = useMemo(() => {
-    const sourceProducts = props.data.sectorProfitability.products;
-    const totalRevenue = sourceProducts.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
-    return SECTOR_NAMES.map((name) => {
-      const products = sourceProducts.filter((product) => product.sector === name);
-      const revenue = products.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
-      const knownRevenue = products.reduce((sum, product) => sum + Number(product.known_revenue_cents) / 100, 0);
-      const cmv = products.reduce((sum, product) => sum + Number(product.known_cmv ?? 0), 0);
-      const grossProfit = knownRevenue - cmv;
-      const sectorExpenses = props.data.expenses.filter((expense) => sectorNameForSource(nested(expense.areas)?.name) === name);
-      const pessoal = sectorExpenses.filter((expense) => expense.source_type === "work_shift" || expense.source_type === "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
-      const opex = sectorExpenses.filter((expense) => expense.source_type !== "work_shift" && expense.source_type !== "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
-      const result = grossProfit - pessoal - opex;
-      return { name, revenue, share: totalRevenue > 0 ? revenue / totalRevenue : 0, knownRevenue, cmv, grossProfit, pessoal, opex, result, margin: knownRevenue > 0 ? result / knownRevenue : null };
-    });
-  }, [props.data.sectorProfitability, props.data.expenses, range]);
+  const sectorResults = useMemo(() => computeSectorResults(props.data.sectorProfitability.products, props.data.expenses, range), [props.data.sectorProfitability, props.data.expenses, range]);
   const sectorTotal = sectorResults.reduce((sum, row) => sum + row.result, 0);
   const generalExpenses = props.data.expenses.filter((expense) => sectorNameForSource(nested(expense.areas)?.name) === null && !expense.purchase_id);
   const generalPessoal = generalExpenses.filter((expense) => expense.source_type === "work_shift" || expense.source_type === "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
@@ -514,6 +519,228 @@ function DreCompareRow({ label, current, previous, money }: { label: string; cur
   const format = (value: number | null) => value === null ? "—" : money ? MONEY.format(value) : `${NUMBER.format(value * 100)}%`;
   const change = pctChange(current, previous);
   return <div className="dre-compare-row"><span>{label}</span><div><small>Atual</small><strong>{format(current)}</strong></div><div><small>Anterior</small><strong>{format(previous)}</strong></div><div className={change === null ? "" : change >= 0 ? "positive" : "negative"}><small>Variação</small><strong>{change === null ? "—" : `${change > 0 ? "+" : ""}${NUMBER.format(change * 100)}%`}</strong></div></div>;
+}
+
+type InsightPriority = "critical" | "attention" | "opportunity" | "info";
+type Insight = { id: string; priority: InsightPriority; category: string; title: string; detail: string; impact?: string };
+const PRIORITY_ORDER: Record<InsightPriority, number> = { critical: 0, attention: 1, opportunity: 2, info: 3 };
+const PRIORITY_LABEL: Record<InsightPriority, string> = { critical: "Crítico", attention: "Atenção", opportunity: "Oportunidade", info: "Informação" };
+function pct(value: number) { return `${NUMBER.format(value * 100)}%`; }
+function sortInsights(rows: Insight[]) { return [...rows].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]); }
+
+function buildFinancialInsights(current: DreSummary, previous: DreSummary, sectorResults: SectorResult[], previousSectorResults: SectorResult[]): Insight[] {
+  const insights: Insight[] = [];
+  const hasHistory = previous.netRevenue > 0;
+  const revenueChange = pctChange(current.netRevenue, previous.netRevenue);
+  const resultChange = pctChange(current.operatingResult, previous.operatingResult);
+  const cmvPct = current.netRevenue > 0 ? current.cmv / current.netRevenue : null;
+  const previousCmvPct = previous.netRevenue > 0 ? previous.cmv / previous.netRevenue : null;
+  const operatingMargin = current.netRevenue > 0 ? current.operatingResult / current.netRevenue : null;
+  const previousOperatingMargin = previous.netRevenue > 0 ? previous.operatingResult / previous.netRevenue : null;
+  const pessoalChange = pctChange(current.pessoal, previous.pessoal);
+
+  if (!hasHistory) {
+    insights.push({ id: "no-history", priority: "info", category: "Histórico", title: "Ainda não há histórico suficiente para comparar períodos", detail: "Assim que existir um período anterior equivalente com dados, o ERP passa a comparar automaticamente faturamento, CMV, pessoal e resultado." });
+  } else {
+    if (revenueChange !== null && revenueChange > 0.03 && resultChange !== null && resultChange < -0.03) insights.push({ id: "revenue-up-result-down", priority: "attention", category: "DRE", title: "Faturamento subiu, mas o resultado caiu", detail: `Receita líquida cresceu ${pct(revenueChange)}, mas o resultado operacional caiu ${pct(Math.abs(resultChange))} no mesmo período.`, impact: MONEY.format(current.operatingResult - previous.operatingResult) });
+    if (cmvPct !== null && previousCmvPct !== null && cmvPct - previousCmvPct > 0.02) insights.push({ id: "cmv-up", priority: cmvPct - previousCmvPct > 0.05 ? "critical" : "attention", category: "CMV", title: "CMV aumentou em relação ao período anterior", detail: `O CMV foi de ${pct(previousCmvPct)} para ${pct(cmvPct)} da receita líquida.`, impact: `+${MONEY.format(current.cmv - previous.cmv)}` });
+    if (operatingMargin !== null && previousOperatingMargin !== null && operatingMargin < previousOperatingMargin - 0.02) insights.push({ id: "margin-down", priority: previousOperatingMargin - operatingMargin > 0.05 ? "critical" : "attention", category: "DRE", title: "Margem operacional caiu", detail: `A margem operacional caiu de ${pct(previousOperatingMargin)} para ${pct(operatingMargin)}.`, impact: MONEY.format(current.operatingResult - previous.operatingResult) });
+    if (pessoalChange !== null && revenueChange !== null && pessoalChange > revenueChange + 0.05) insights.push({ id: "pessoal-up", priority: "attention", category: "Pessoal", title: "Custo de pessoal cresceu mais que o faturamento", detail: `Pessoal ${pessoalChange >= 0 ? "subiu" : "caiu"} ${pct(Math.abs(pessoalChange))} enquanto a receita ${revenueChange >= 0 ? "cresceu" : "caiu"} ${pct(Math.abs(revenueChange))}.`, impact: MONEY.format(current.pessoal - previous.pessoal) });
+    current.opexCategories.forEach((row) => { const prior = previous.opexCategories.find((item) => item.category === row.category); const change = pctChange(row.amount, prior?.amount ?? null); const delta = row.amount - Number(prior?.amount ?? 0); if (change !== null && change > 0.3 && delta > 80) insights.push({ id: `opex-${row.category}`, priority: delta > 400 ? "attention" : "info", category: "Despesas", title: `${row.category} aumentou significativamente`, detail: `Foi de ${MONEY.format(Number(prior?.amount ?? 0))} para ${MONEY.format(row.amount)} no período (${pct(change)}).`, impact: MONEY.format(delta) }); });
+    if (current.operatingResult < 0) insights.push({ id: "negative-result", priority: "critical", category: "DRE", title: "Resultado operacional negativo no período", detail: `O período fechou em ${MONEY.format(current.operatingResult)} depois de CMV, pessoal e despesas operacionais.`, impact: MONEY.format(current.operatingResult) });
+  }
+  if (current.cmvRevenue > 0 && current.cmvCoverage < 0.85) insights.push({ id: "cmv-coverage", priority: current.cmvCoverage < 0.6 ? "attention" : "info", category: "Qualidade de dados", title: "Cobertura de CMV incompleta", detail: `${pct(current.cmvCoverage)} da receita tem custo confiável no período. ${MONEY.format(current.cmvMissingRevenue)} ainda não entram no CMV conhecido, então o resultado acima é o resultado conhecido, não uma estimativa completa.` });
+
+  const activeSectors = sectorResults.filter((row) => row.revenue > 0);
+  activeSectors.filter((row) => row.result < 0).forEach((row) => insights.push({ id: `sector-negative-${row.name}`, priority: "critical", category: "Setor", title: `${row.name} com resultado negativo`, detail: `${row.name} faturou ${MONEY.format(row.revenue)}, mas o resultado conhecido é ${MONEY.format(row.result)} depois de CMV, pessoal e despesas atribuídas.`, impact: MONEY.format(row.result) }));
+  activeSectors.forEach((row) => {
+    const prior = previousSectorResults.find((item) => item.name === row.name);
+    if (!prior || prior.revenue <= 0) return;
+    const revChange = pctChange(row.revenue, prior.revenue);
+    const resChange = pctChange(row.result, prior.result);
+    if (revChange === null || resChange === null || !(revChange > 0.05 && resChange < -0.05)) return;
+    const reasons: string[] = [];
+    const cmvPctSector = row.knownRevenue > 0 ? row.cmv / row.knownRevenue : null;
+    const priorCmvPctSector = prior.knownRevenue > 0 ? prior.cmv / prior.knownRevenue : null;
+    if (cmvPctSector !== null && priorCmvPctSector !== null && cmvPctSector > priorCmvPctSector + 0.02) reasons.push("aumento do CMV");
+    const pessoalChangeSector = pctChange(row.pessoal, prior.pessoal);
+    if (pessoalChangeSector !== null && pessoalChangeSector > 0.1) reasons.push("aumento do custo de pessoal");
+    insights.push({ id: `sector-rev-up-result-down-${row.name}`, priority: "attention", category: "Setor", title: `${row.name} faturou mais, mas o resultado caiu`, detail: `${row.name} faturou ${pct(revChange)} a mais${reasons.length ? `, por causa do ${reasons.join(" e do ")}` : ""}, mas o resultado caiu ${pct(Math.abs(resChange))}.`, impact: MONEY.format(row.result - prior.result) });
+  });
+  if (activeSectors.length) { const best = activeSectors.reduce((a, b) => (b.revenue > a.revenue ? b : a)); insights.push({ id: "sector-best-revenue", priority: "info", category: "Setor", title: `${best.name} é o setor que mais fatura`, detail: `${best.name} representa ${pct(best.share)} do faturamento do período.` }); }
+  return insights;
+}
+
+function buildProductInsights(products: SectorProduct[], previousProducts: SectorProduct[]): Insight[] {
+  const insights: Insight[] = [];
+  const totalRevenue = products.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
+  if (totalRevenue <= 0) return insights;
+  const previousByKey = new Map(previousProducts.map((product) => [productProfitabilityKey(product), product]));
+  const rows = products.map((product) => {
+    const revenue = Number(product.revenue_cents) / 100;
+    const costedQuantity = Number(product.costed_quantity);
+    const missingQuantity = Number(product.missing_cost_quantity);
+    const knownCmv = Number(product.known_cmv ?? 0);
+    const costStatus: "known" | "partial" | "missing" = costedQuantity <= 0 ? "missing" : missingQuantity > 0 ? "partial" : "known";
+    const margin = costStatus === "known" && revenue > 0 ? (revenue - knownCmv) / revenue : null;
+    const prior = previousByKey.get(productProfitabilityKey(product));
+    const priorRevenue = prior ? Number(prior.revenue_cents) / 100 : 0;
+    const priorCostedQuantity = prior ? Number(prior.costed_quantity) : 0;
+    const priorMissingQuantity = prior ? Number(prior.missing_cost_quantity) : 0;
+    const priorMargin = prior && priorCostedQuantity > 0 && priorMissingQuantity <= 0 && priorRevenue > 0 ? (priorRevenue - Number(prior.known_cmv ?? 0)) / priorRevenue : null;
+    return { name: product.name, revenue, share: revenue / totalRevenue, margin, priorMargin, costStatus };
+  });
+  const known = rows.filter((row) => row.margin !== null);
+  known.filter((row) => Number(row.margin) < 0 && row.revenue >= 50).sort((a, b) => b.revenue - a.revenue).slice(0, 3).forEach((row) => insights.push({ id: `product-negative-margin-${row.name}`, priority: "critical", category: "Produto", title: `${row.name} está com margem negativa`, detail: `Faturou ${MONEY.format(row.revenue)} no período, mas o custo conhecido supera a receita (margem de ${pct(Number(row.margin))}).` }));
+  known.filter((row) => row.priorMargin !== null && row.priorMargin - Number(row.margin) > 0.12 && row.revenue >= 150).sort((a, b) => (b.priorMargin! - Number(b.margin)) - (a.priorMargin! - Number(a.margin))).slice(0, 3).forEach((row) => insights.push({ id: `product-margin-drop-${row.name}`, priority: "attention", category: "Produto", title: `${row.name} teve queda relevante de margem`, detail: `A margem caiu de ${pct(Number(row.priorMargin))} para ${pct(Number(row.margin))}, com faturamento de ${MONEY.format(row.revenue)} no período.` }));
+  const revenueValues = rows.filter((row) => row.revenue > 0).map((row) => row.revenue);
+  const revenueCut = median(revenueValues);
+  known.filter((row) => row.revenue >= revenueCut && Number(row.margin) < 0.25 && row.revenue >= 100).sort((a, b) => b.revenue - a.revenue).slice(0, 3).forEach((row) => insights.push({ id: `product-high-sales-low-margin-${row.name}`, priority: "attention", category: "Produto", title: `${row.name} vende bem, mas com margem baixa`, detail: `Faturou ${MONEY.format(row.revenue)} (${pct(row.share)} das vendas) com margem de apenas ${pct(Number(row.margin))}.` }));
+  known.filter((row) => Number(row.margin) >= 0.5 && row.share < 0.03 && row.revenue > 0).sort((a, b) => Number(b.margin) - Number(a.margin)).slice(0, 3).forEach((row) => insights.push({ id: `product-opportunity-${row.name}`, priority: "opportunity", category: "Produto", title: `${row.name} pode ter espaço para vender mais`, detail: `Margem de ${pct(Number(row.margin))}, mas representa só ${pct(row.share)} das vendas do período. Pode ser uma oportunidade para analisar destaque no cardápio ou no salão.` }));
+  rows.filter((row) => row.costStatus === "missing" && row.revenue >= 200).sort((a, b) => b.revenue - a.revenue).slice(0, 3).forEach((row) => insights.push({ id: `product-missing-cost-${row.name}`, priority: "info", category: "Qualidade de dados", title: `${row.name} não tem custo confiável cadastrado`, detail: `Faturou ${MONEY.format(row.revenue)} no período, mas sem ficha técnica ou custo válido a margem não pode ser calculada.` }));
+  return insights;
+}
+
+function buildStockInsights(stock: StockDashboard): Insight[] {
+  const insights: Insight[] = [];
+  const outOfStock = stock.items.filter((item) => item.status === "out" && item.has_baseline);
+  if (outOfStock.length) insights.push({ id: "stock-out", priority: "critical", category: "Estoque", title: `${outOfStock.length} item(ns) sem estoque`, detail: `${outOfStock.slice(0, 4).map((item) => item.name).join(", ")}${outOfStock.length > 4 ? ` e mais ${outOfStock.length - 4}` : ""} com saldo teórico zerado ou negativo.` });
+  const belowMinimum = stock.items.filter((item) => item.status === "low" || item.status === "below_minimum");
+  if (belowMinimum.length) insights.push({ id: "stock-low", priority: "attention", category: "Estoque", title: `${belowMinimum.length} item(ns) abaixo do mínimo`, detail: `${belowMinimum.slice(0, 4).map((item) => item.name).join(", ")}${belowMinimum.length > 4 ? ` e mais ${belowMinimum.length - 4}` : ""} estão abaixo do estoque mínimo cadastrado.` });
+  const divergent = stock.items.filter((item) => item.last_variance_quantity !== null && item.variance_value !== null && Math.abs(Number(item.variance_value)) >= 40);
+  divergent.sort((a, b) => Math.abs(Number(b.variance_value)) - Math.abs(Number(a.variance_value))).slice(0, 3).forEach((item) => insights.push({ id: `stock-divergence-${item.id}`, priority: Math.abs(Number(item.variance_value)) > 150 ? "attention" : "info", category: "Divergência", title: `${item.name} apresentou divergência de estoque`, detail: `Diferença de ${NUMBER.format(Math.abs(Number(item.last_variance_quantity)))} ${item.unit} no último inventário, equivalente a ${MONEY.format(Math.abs(Number(item.variance_value)))}. Não indica automaticamente furto ou erro — vale investigar a origem.`, impact: MONEY.format(Number(item.variance_value)) }));
+  const totalVariance = stock.items.reduce((sum, item) => sum + Math.abs(Number(item.variance_value ?? 0)), 0);
+  if (totalVariance >= 60) insights.push({ id: "stock-variance-total", priority: totalVariance > 500 ? "attention" : "info", category: "Divergência", title: "Divergências de estoque no período", detail: `A soma das diferenças entre estoque teórico e físico no período é de aproximadamente ${MONEY.format(totalVariance)}.`, impact: MONEY.format(totalVariance) });
+  const risk = stock.items.filter((item) => item.suggested_purchase !== null && Number(item.suggested_purchase) > 0 && item.reference_days !== null && Number(item.reference_days) >= 2 && item.has_baseline);
+  risk.sort((a, b) => Number(b.suggested_purchase) - Number(a.suggested_purchase)).slice(0, 3).forEach((item) => insights.push({ id: `stock-risk-${item.id}`, priority: "attention", category: "Reposição", title: `Estoque de ${item.name} pode ser insuficiente`, detail: `Estoque atual de ${NUMBER.format(Number(item.theoretical_quantity))} ${item.unit}. A referência de ${item.reference_days} período(s) comparável(is) recente(s) sugere consumo de ${NUMBER.format(Number(item.expected_quantity))} ${item.unit} — estimativa aproximada baseada no histórico, não uma garantia.` }));
+  const parados = stock.items.filter((item) => item.has_baseline && item.stock_value !== null && Number(item.stock_value) >= 150 && Number(item.theoretical_quantity) > 0 && item.consumed_period <= Number(item.theoretical_quantity) * 0.15);
+  parados.sort((a, b) => Number(b.stock_value) - Number(a.stock_value)).slice(0, 3).forEach((item) => insights.push({ id: `stock-slow-${item.id}`, priority: "opportunity", category: "Estoque parado", title: `${item.name} com giro baixo`, detail: `${MONEY.format(Number(item.stock_value))} imobilizados neste item, com apenas ${NUMBER.format(item.consumed_period)} ${item.unit} consumidos no período analisado.`, impact: MONEY.format(Number(item.stock_value)) }));
+  return insights;
+}
+
+type PriceHistoryPoint = { item_id: string; item_name: string; supplier_id: string; supplier_name: string | null; unit_cost: number; received_at: string };
+function buildPurchaseInsights(priceHistory: PriceHistoryPoint[]): Insight[] {
+  const insights: Insight[] = [];
+  const byItem = new Map<string, PriceHistoryPoint[]>();
+  priceHistory.forEach((point) => byItem.set(point.item_id, [...(byItem.get(point.item_id) ?? []), point]));
+  byItem.forEach((points) => {
+    if (points.length < 2) return;
+    const sorted = [...points].sort((a, b) => a.received_at.localeCompare(b.received_at));
+    const latest = sorted[sorted.length - 1]; const before = sorted[sorted.length - 2];
+    const change = before.unit_cost > 0 ? (latest.unit_cost - before.unit_cost) / before.unit_cost : null;
+    if (change !== null && change > 0.08) insights.push({ id: `purchase-price-${latest.item_id}`, priority: change > 0.15 ? "attention" : "info", category: "Compras", title: `${latest.item_name} ficou mais caro`, detail: `O último preço pago foi ${MONEY.format(latest.unit_cost)}, ${pct(change)} acima da compra anterior (${MONEY.format(before.unit_cost)}) registrada em ${dateLabel(before.received_at)}.` });
+  });
+  const byItemName = new Map<string, PriceHistoryPoint[]>();
+  priceHistory.forEach((point) => byItemName.set(point.item_name, [...(byItemName.get(point.item_name) ?? []), point]));
+  byItemName.forEach((points, name) => {
+    const bySupplier = new Map<string, PriceHistoryPoint>();
+    [...points].sort((a, b) => a.received_at.localeCompare(b.received_at)).forEach((point) => bySupplier.set(point.supplier_id, point));
+    const list = [...bySupplier.values()];
+    if (list.length < 2) return;
+    const sortedByPrice = [...list].sort((a, b) => a.unit_cost - b.unit_cost);
+    const cheapest = sortedByPrice[0]; const priciest = sortedByPrice[sortedByPrice.length - 1];
+    const diff = cheapest.unit_cost > 0 ? (priciest.unit_cost - cheapest.unit_cost) / cheapest.unit_cost : null;
+    if (diff !== null && diff > 0.1) insights.push({ id: `supplier-diff-${name}`, priority: "opportunity", category: "Fornecedores", title: `${name} tem preços diferentes entre fornecedores`, detail: `O último preço de ${priciest.supplier_name ?? "um fornecedor"} foi ${pct(diff)} maior que o de ${cheapest.supplier_name ?? "outro fornecedor"} (${MONEY.format(priciest.unit_cost)} vs. ${MONEY.format(cheapest.unit_cost)}).` });
+  });
+  return insights;
+}
+
+type PersonnelShiftRow = { hours_worked: number; amount_due: number };
+type PersonnelCostRow = { amount: number };
+function buildPersonnelInsights(currentShifts: PersonnelShiftRow[], currentCosts: PersonnelCostRow[], previousShifts: PersonnelShiftRow[], previousCosts: PersonnelCostRow[], netRevenue: number): Insight[] {
+  const insights: Insight[] = [];
+  const currentHours = currentShifts.reduce((sum, row) => sum + Number(row.hours_worked), 0);
+  const previousHours = previousShifts.reduce((sum, row) => sum + Number(row.hours_worked), 0);
+  const currentTotal = currentShifts.reduce((sum, row) => sum + Number(row.amount_due), 0) + currentCosts.reduce((sum, row) => sum + Number(row.amount), 0);
+  const previousTotal = previousShifts.reduce((sum, row) => sum + Number(row.amount_due), 0) + previousCosts.reduce((sum, row) => sum + Number(row.amount), 0);
+  const hoursChange = pctChange(currentHours, previousHours);
+  if (hoursChange !== null && hoursChange > 0.2 && currentHours > 0) insights.push({ id: "personnel-hours-up", priority: "info", category: "Pessoal", title: "Horas trabalhadas aumentaram no período", detail: `As horas registradas somam ${NUMBER.format(currentHours)} h, ${pct(hoursChange)} a mais que o período anterior equivalente (${NUMBER.format(previousHours)} h).` });
+  const costChange = pctChange(currentTotal, previousTotal);
+  if (costChange !== null && costChange > 0.2 && currentTotal > 0) insights.push({ id: "personnel-cost-up", priority: "attention", category: "Pessoal", title: "Custo de pessoal cresceu bastante no período", detail: `O custo de pessoal foi de ${MONEY.format(previousTotal)} para ${MONEY.format(currentTotal)} (${pct(costChange)}) em relação ao período anterior equivalente.`, impact: MONEY.format(currentTotal - previousTotal) });
+  const pessoalPct = netRevenue > 0 ? currentTotal / netRevenue : null;
+  if (pessoalPct !== null && pessoalPct > 0.3) insights.push({ id: "personnel-pct-revenue", priority: "attention", category: "Pessoal", title: "Custo de pessoal está pesado em relação ao faturamento", detail: `Pessoal representa ${pct(pessoalPct)} da receita líquida do período.` });
+  return insights;
+}
+
+function InsightsPage(props: Parameters<typeof SectionContent>[0]) {
+  const range = props.range;
+  const previousRange = previousEquivalentRange(range);
+  const apiHasData = props.data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
+  const current = useMemo(() => computeDreSummary(props.data.zig, props.data.catalogItems, props.data.expenses, range, apiHasData, props.data.sales), [props.data.zig, props.data.catalogItems, props.data.expenses, range, apiHasData, props.data.sales]);
+  const previous = useMemo(() => computeDreSummary(props.data.previousZig, props.data.catalogItems, props.data.expenses, previousRange, apiHasData, props.data.sales), [props.data.previousZig, props.data.catalogItems, props.data.expenses, previousRange, apiHasData, props.data.sales]);
+  const sectorResults = useMemo(() => computeSectorResults(props.data.sectorProfitability.products, props.data.expenses, range), [props.data.sectorProfitability, props.data.expenses, range]);
+  const previousSectorResults = useMemo(() => computeSectorResults(props.data.previousSectorProfitability.products, props.data.expenses, previousRange), [props.data.previousSectorProfitability, props.data.expenses, previousRange]);
+
+  const [stock, setStock] = useState<StockDashboard>(EMPTY_STOCK);
+  const [priceHistory, setPriceHistory] = useState<PriceHistoryPoint[]>([]);
+  const [personnel, setPersonnel] = useState<{ shifts: PersonnelShiftRow[]; costs: PersonnelCostRow[] }>({ shifts: [], costs: [] });
+  const [previousPersonnel, setPreviousPersonnel] = useState<{ shifts: PersonnelShiftRow[]; costs: PersonnelCostRow[] }>({ shifts: [], costs: [] });
+  const [loadingExtra, setLoadingExtra] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoadingExtra(true);
+      const [stockResult, purchasesResult, personnelResult, previousPersonnelResult] = await Promise.all([
+        supabase.rpc("get_virtual_inventory_dashboard", { p_business_id: Number(props.businessId), p_period_start: range.start, p_period_end: range.end }),
+        supabase.rpc("get_purchases_dashboard", { p_business_id: Number(props.businessId), p_period_start: range.start, p_period_end: range.end }),
+        supabase.rpc("get_personnel_dashboard", { p_business_id: Number(props.businessId), p_period_start: range.start, p_period_end: range.end }),
+        supabase.rpc("get_personnel_dashboard", { p_business_id: Number(props.businessId), p_period_start: previousRange.start, p_period_end: previousRange.end }),
+      ]);
+      if (cancelled) return;
+      setStock((stockResult.data as StockDashboard | null) ?? EMPTY_STOCK);
+      setPriceHistory(((purchasesResult.data as { price_history?: PriceHistoryPoint[] } | null)?.price_history) ?? []);
+      const personnelData = personnelResult.data as { shifts?: PersonnelShiftRow[]; costs?: PersonnelCostRow[] } | null;
+      setPersonnel({ shifts: personnelData?.shifts ?? [], costs: personnelData?.costs ?? [] });
+      const previousPersonnelData = previousPersonnelResult.data as { shifts?: PersonnelShiftRow[]; costs?: PersonnelCostRow[] } | null;
+      setPreviousPersonnel({ shifts: previousPersonnelData?.shifts ?? [], costs: previousPersonnelData?.costs ?? [] });
+      setLoadingExtra(false);
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [props.businessId, range.start, range.end, previousRange.start, previousRange.end]);
+
+  const insights = useMemo(() => {
+    const rows = [
+      ...buildFinancialInsights(current, previous, sectorResults, previousSectorResults),
+      ...buildProductInsights(props.data.sectorProfitability.products, props.data.previousSectorProfitability.products),
+      ...buildStockInsights(stock),
+      ...buildPurchaseInsights(priceHistory),
+      ...buildPersonnelInsights(personnel.shifts, personnel.costs, previousPersonnel.shifts, previousPersonnel.costs, current.netRevenue),
+    ];
+    return sortInsights(rows);
+  }, [current, previous, sectorResults, previousSectorResults, props.data.sectorProfitability, props.data.previousSectorProfitability, stock, priceHistory, personnel, previousPersonnel]);
+
+  const grouped = (["critical", "attention", "opportunity", "info"] as const).map((priority) => ({ priority, rows: insights.filter((row) => row.priority === priority) })).filter((group) => group.rows.length > 0);
+  const periodLabel = `${dateLabel(range.start)} a ${dateLabel(range.end)}`;
+
+  return <section className="insights-page">
+    <ModuleHero eyebrow="Inteligência gerencial" title="O que revisar hoje" description="O ERP cruza vendas, CMV, pessoal, estoque, compras e despesas já cadastrados para apontar automaticamente o que merece atenção." icon={<Sparkles size={19} />} action="Atualizar" onAction={() => props.onRefresh()} />
+    <p className="dre-source-note"><CheckCircle2 size={15} />{periodLabel} · {insights.length} insight(s) encontrados{loadingExtra ? " · carregando estoque, compras e pessoal..." : ""}</p>
+    {insights.length ? <div className="insights-groups">
+      {grouped.map((group) => <div className={`insights-group priority-${group.priority}`} key={group.priority}>
+        <div className="insights-group-head"><span className={`insight-priority-dot ${group.priority}`} /><strong>{PRIORITY_LABEL[group.priority]}</strong><small>{group.rows.length}</small></div>
+        <div className="insights-list">{group.rows.map((row) => <article className="insight-card" key={row.id}><div className="insight-card-head"><span className="insight-category">{row.category}</span>{row.impact && <span className="insight-impact">{row.impact}</span>}</div><h3>{row.title}</h3><p>{row.detail}</p></article>)}</div>
+      </div>)}
+    </div> : <EmptyMini text="Nenhum ponto de atenção identificado com os dados atuais do período." />}
+  </section>;
+}
+
+function AttentionPanel({ data, range }: { data: DataState; range: DateRange }) {
+  const previousRange = previousEquivalentRange(range);
+  const apiHasData = data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
+  const current = useMemo(() => computeDreSummary(data.zig, data.catalogItems, data.expenses, range, apiHasData, data.sales), [data.zig, data.catalogItems, data.expenses, range, apiHasData, data.sales]);
+  const previous = useMemo(() => computeDreSummary(data.previousZig, data.catalogItems, data.expenses, previousRange, apiHasData, data.sales), [data.previousZig, data.catalogItems, data.expenses, previousRange, apiHasData, data.sales]);
+  const sectorResults = useMemo(() => computeSectorResults(data.sectorProfitability.products, data.expenses, range), [data.sectorProfitability, data.expenses, range]);
+  const previousSectorResults = useMemo(() => computeSectorResults(data.previousSectorProfitability.products, data.expenses, previousRange), [data.previousSectorProfitability, data.expenses, previousRange]);
+  const insights = useMemo(() => sortInsights([
+    ...buildFinancialInsights(current, previous, sectorResults, previousSectorResults),
+    ...buildProductInsights(data.sectorProfitability.products, data.previousSectorProfitability.products),
+  ]).filter((row) => row.priority === "critical" || row.priority === "attention" || row.priority === "opportunity").slice(0, 4), [current, previous, sectorResults, previousSectorResults, data.sectorProfitability, data.previousSectorProfitability]);
+  if (!insights.length) return null;
+  return <article className="chart-card attention-panel"><div className="card-title-row"><div><p>Inteligência gerencial</p><h3>O que precisa da sua atenção</h3></div></div>
+    <div className="attention-list">{insights.map((row) => <div className={`attention-row priority-${row.priority}`} key={row.id}><span className={`insight-priority-dot ${row.priority}`} /><div><strong>{row.title}</strong><small>{row.detail}</small></div></div>)}</div>
+  </article>;
 }
 
 function SalesPage(props: Parameters<typeof SectionContent>[0]) {
