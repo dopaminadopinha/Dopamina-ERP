@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { CalendarClock, CheckCircle2, Clock3, Plus, Search, TriangleAlert, UserRound, UsersRound, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useEscapeToClose } from "@/lib/use-escape-close";
 
 type Range = { start: string; end: string };
 type Area = { id: string; name: string };
@@ -143,5 +144,5 @@ function CostModal({businessId,employees,areas,onClose,onSaved}:{businessId:stri
 
 function ClosingModal({businessId,range,onClose,onSaved}:{businessId:string;range:Range;onClose:()=>void;onSaved:()=>Promise<void>}) {const [form,setForm]=useState({start:range.start,end:range.end,notes:''});const [busy,setBusy]=useState(false);const [message,setMessage]=useState('');async function save(e:React.FormEvent){e.preventDefault();setBusy(true);const result=await supabase.rpc('create_payroll_closing',{p_business_id:Number(businessId),p_period_start:form.start,p_period_end:form.end,p_notes:form.notes});if(result.error){setMessage(result.error.message);setBusy(false);return;}await onSaved();}return <Modal title="Fechar período" subtitle="Agrupa somente valores pendentes ainda não incluídos em outro fechamento." onClose={onClose}><form onSubmit={save} className="personnel-form"><label><span>Início</span><input type="date" value={form.start} onChange={e=>setForm({...form,start:e.target.value})}/></label><label><span>Fim</span><input type="date" value={form.end} onChange={e=>setForm({...form,end:e.target.value})}/></label><label className="wide"><span>Observações</span><input value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/></label>{message&&<p className="form-message">{message}</p>}<Actions busy={busy} label="Criar fechamento"/></form></Modal>;}
 
-function Modal({title,subtitle,onClose,children}:{title:string;subtitle:string;onClose:()=>void;children:React.ReactNode}) {return <div className="personnel-modal-backdrop"><div className="personnel-modal" role="dialog" aria-modal="true" aria-label={title}><button className="personnel-modal-close" onClick={onClose} aria-label="Fechar"><X size={18}/></button><p>GESTÃO DE PESSOAL</p><h2>{title}</h2><span className="personnel-modal-subtitle">{subtitle}</span>{children}</div></div>;}
+function Modal({title,subtitle,onClose,children}:{title:string;subtitle:string;onClose:()=>void;children:React.ReactNode}) {useEscapeToClose(onClose);return <div className="personnel-modal-backdrop"><div className="personnel-modal" role="dialog" aria-modal="true" aria-label={title}><button className="personnel-modal-close" onClick={onClose} aria-label="Fechar"><X size={18}/></button><p>GESTÃO DE PESSOAL</p><h2>{title}</h2><span className="personnel-modal-subtitle">{subtitle}</span>{children}</div></div>;}
 function Actions({busy,label='Salvar'}:{busy:boolean;label?:string}) {return <div className="personnel-form-actions"><button type="submit" disabled={busy}>{busy?'Salvando…':label}</button></div>;}

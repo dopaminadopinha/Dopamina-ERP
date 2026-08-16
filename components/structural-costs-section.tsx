@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useEscapeToClose } from "@/lib/use-escape-close";
 
 type Area = { id: string; name: string };
 type StructureType = "terrain" | "container" | "bathroom" | "other";
@@ -99,5 +100,6 @@ function StructureModal({ businessId, areas, structure, onClose, onSaved }: { bu
 }
 
 function Modal({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: React.ReactNode }) {
+  useEscapeToClose(onClose);
   return <div className="personnel-modal-backdrop"><div className="personnel-modal" role="dialog" aria-modal="true" aria-label={title}><button className="personnel-modal-close" onClick={onClose} aria-label="Fechar"><X size={18} /></button><p>DESPESAS</p><h2>{title}</h2><span className="personnel-modal-subtitle">{subtitle}</span>{children}</div></div>;
 }
