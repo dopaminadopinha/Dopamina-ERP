@@ -11,6 +11,7 @@ import {
   UsersRound, WalletCards, X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { useEscapeToClose } from "@/lib/use-escape-close";
 import { PurchasesPage } from "@/components/purchases-page";
 import { PersonnelPage } from "@/components/personnel-page";
 import { StructuralCostsSection } from "@/components/structural-costs-section";
@@ -1106,7 +1107,7 @@ function StockMovementHistory({ rows }: { rows: StockMovement[] }) { return <sec
 
 function StockInventoryHistory({ rows, onNew }: { rows: StockInventory[]; onNew: () => void }) { return <section className="stock-history-section"><div className="stock-section-heading"><div><p>Conferência física</p><h3>Inventários concluídos</h3><span>Cada diferença permanece registrada mesmo depois de corrigir o saldo teórico.</span></div><button type="button" onClick={onNew}><Plus size={15} /> Nova contagem</button></div>{rows.length ? <div className="inventory-history-grid">{rows.map((row) => <article key={row.id}><span>{new Date(row.counted_at).toLocaleString("pt-BR")}</span><strong>{row.item_count} item(ns) contados</strong><div><small>Com diferença</small><b>{row.divergent_items}</b></div><div><small>Valor das diferenças</small><b>{MONEY.format(Number(row.variance_value))}</b></div><p>{row.notes || "Sem observações"}</p></article>)}</div> : <div className="stock-empty-action"><ClipboardList size={25} /><h3>Nenhum inventário realizado</h3><p>A primeira contagem cria a base física do estoque sem apagar as vendas já registradas.</p><button type="button" onClick={onNew}>Começar contagem</button></div>}</section>; }
 
-function ModalShell({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: React.ReactNode }) { return <div className="modal-backdrop" role="presentation"><div className="modal-card stock-modal" role="dialog" aria-modal="true" aria-label={title}><button type="button" className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Estoque</p><h2>{title}</h2><p className="modal-description">{subtitle}</p>{children}</div></div>; }
+function ModalShell({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: React.ReactNode }) { useEscapeToClose(onClose); return <div className="modal-backdrop" role="presentation"><div className="modal-card stock-modal" role="dialog" aria-modal="true" aria-label={title}><button type="button" className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Estoque</p><h2>{title}</h2><p className="modal-description">{subtitle}</p>{children}</div></div>; }
 
 function InventoryCountModal({ businessId, items, onClose, onSaved }: { businessId: string; items: StockItem[]; onClose: () => void; onSaved: () => Promise<void> }) {
   const [query, setQuery] = useState(""); const [counts, setCounts] = useState<Record<string, string>>({}); const [notes, setNotes] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
@@ -1201,6 +1202,7 @@ function costAt(item: CatalogItem, date: string, history: CostHistory[]) {
 }
 
 function ProductEditorModal({ businessId, item, data, onClose, onRefresh }: { businessId: string; item: CatalogItem; data: DataState; onClose: () => void; onRefresh: () => Promise<void> }) {
+  useEscapeToClose(onClose);
   const today = isoInSaoPaulo();
   const currentRecipe = data.recipes.find((recipe) => String(recipe.product_id) === String(item.id) && recipe.effective_from <= today);
   const currentComponents = currentRecipe ? data.recipeItems.filter((component) => String(component.recipe_id) === String(currentRecipe.id)) : [];
@@ -1260,6 +1262,7 @@ function ProductEditorModal({ businessId, item, data, onClose, onRefresh }: { bu
 }
 
 function IngredientModal({ businessId, item, onClose, onSaved }: { businessId: string; item: CatalogItem | null; onClose: () => void; onSaved: () => Promise<void> }) {
+  useEscapeToClose(onClose);
   const [name, setName] = useState(item?.name ?? "");
   const [unit, setUnit] = useState(item?.consumption_unit ?? "ml");
   const [cost, setCost] = useState(item?.average_unit_cost === null || item?.average_unit_cost === undefined ? "" : String(item.average_unit_cost));
@@ -1300,6 +1303,7 @@ function PlanningPage(props: Parameters<typeof SectionContent>[0]) {
 }
 
 function ForecastModal({ businessId, userId, areas, range, onClose, onSaved }: { businessId: string; userId: string; areas: Area[]; range: DateRange; onClose: () => void; onSaved: () => Promise<void> }) {
+  useEscapeToClose(onClose);
   const [form, setForm] = useState({ forecast_type: "revenue" as "revenue" | "expense", period_start: range.start, period_end: range.end, amount: "", area_id: "", notes: "" });
   const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
   async function save(event: React.FormEvent) { event.preventDefault(); const amount = Number(form.amount.replace(",", ".")); if (!Number.isFinite(amount) || amount <= 0 || form.period_start > form.period_end) return setMessage("Informe um período válido e um valor maior que zero."); setBusy(true); const { error } = await supabase.from("forecasts").insert({ business_id: Number(businessId), area_id: form.area_id ? Number(form.area_id) : null, forecast_type: form.forecast_type, period_start: form.period_start, period_end: form.period_end, amount, notes: form.notes.trim() || null, created_by: userId }); if (error) { setMessage("Não foi possível salvar a previsão."); setBusy(false); return; } await onSaved(); }
@@ -1424,6 +1428,7 @@ function ImportsPage(props: Parameters<typeof SectionContent>[0]) {
 }
 
 function ImportModal({ businessId, onClose, onImported }: { businessId: string; onClose: () => void; onImported: () => Promise<void> }) {
+  useEscapeToClose(onClose);
   const closingRef = useRef<HTMLInputElement>(null); const productsRef = useRef<HTMLInputElement>(null);
   const [closing, setClosing] = useState<File | null>(null); const [products, setProducts] = useState<File | null>(null);
   const [preview, setPreview] = useState<ZigImportPayload | null>(null); const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
@@ -1434,6 +1439,7 @@ function ImportModal({ businessId, onClose, onImported }: { businessId: string; 
 }
 
 function AnalyticsImportModal({ businessId, onClose, onImported }: { businessId: string; onClose: () => void; onImported: () => Promise<void> }) {
+  useEscapeToClose(onClose);
   const cmvRef = useRef<HTMLInputElement>(null); const abcRef = useRef<HTMLInputElement>(null);
   const [cmvFile, setCmvFile] = useState<File | null>(null); const [abcFile, setAbcFile] = useState<File | null>(null);
   const [cmvPreview, setCmvPreview] = useState<ZigProfitabilityPayload | null>(null); const [abcPreview, setAbcPreview] = useState<ZigAbcPayload | null>(null);
@@ -1465,6 +1471,7 @@ function AnalyticsImportModal({ businessId, onClose, onImported }: { businessId:
 }
 
 function ExpenseModal({ businessId, userId, expense, onClose, onSaved }: { businessId: string; userId: string; expense: Expense | null; onClose: () => void; onSaved: () => Promise<void> }) {
+  useEscapeToClose(onClose);
   const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
   const [form, setForm] = useState({ description: expense?.description ?? "", category: expense?.category ?? "Mercadorias e fornecedores", expense_date: expense?.expense_date ?? isoInSaoPaulo(), due_date: expense?.due_date ?? "", amount: expense?.amount ? String(expense.amount) : "", payment_method: expense?.payment_method ?? "", status: expense?.status ?? "pending", is_recurring: expense?.is_recurring ?? false, cost_behavior: expense?.cost_behavior ?? "variable" });
   function field(name: string, value: string | boolean) { setForm((current) => ({ ...current, [name]: value })); }
