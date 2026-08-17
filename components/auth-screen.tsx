@@ -144,7 +144,7 @@ export function AuthScreen() {
         <div className="brand-content">
           <div className="brand-mark">
             <Image
-              src="/dopamina-mascot.png"
+              src="/dopamina-mascot-yellow.png"
               alt="Dopamina Gastrobar"
               width={420}
               height={280}
