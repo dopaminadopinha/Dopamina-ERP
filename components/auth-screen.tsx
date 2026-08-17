@@ -4,7 +4,6 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import {
-  ArrowRight,
   Eye,
   EyeOff,
   LockKeyhole,
@@ -130,29 +129,34 @@ export function AuthScreen() {
       : "Recuperar senha";
 
   const subtitle = mode === "login"
-    ? "Entre com suas credenciais para continuar"
+    ? "Entre com seu e-mail e senha."
     : mode === "cadastro"
       ? "Cadastre seus dados de acesso"
       : "Informe seu e-mail para receber o link";
 
   return (
     <main className="auth-page">
-      <div className="auth-orb auth-orb-one" />
-      <div className="auth-orb auth-orb-two" />
-      <div className="auth-grid" />
+      <div className="auth-glow" />
+      <div className="auth-arc auth-arc-one" />
+      <div className="auth-arc auth-arc-two" />
 
-      <section className="brand-panel" aria-label="Dopamina ERP">
-        <div className="brand-glow" />
+      <section className="brand-panel" aria-label="Dopamina Gastrobar">
         <div className="brand-content">
           <div className="brand-mark">
             <Image
-              src="/dopamina-logo.png"
-              alt="Logo do Bar Dopamina"
-              width={250}
-              height={232}
+              src="/dopamina-mascot.svg"
+              alt="Mascote do Dopamina Gastrobar"
+              width={340}
+              height={220}
               priority
               unoptimized
             />
+          </div>
+          <div className="brand-wordmark">
+            <span className="brand-word">
+              D<span className="accent-o">O</span>PAMINA
+            </span>
+            <span className="brand-subword">GASTROBAR</span>
           </div>
         </div>
       </section>
@@ -273,7 +277,6 @@ export function AuthScreen() {
                       ? "Criar conta"
                       : "Enviar link"}
               </span>
-              {!loading ? <ArrowRight size={18} /> : null}
             </button>
 
             {mode === "recuperar" ? (
@@ -288,8 +291,6 @@ export function AuthScreen() {
           </form>
         </div>
       </section>
-
-      <footer className="auth-footer">© 2026 Dopamina - Sistema de Gestão</footer>
     </main>
   );
 }
