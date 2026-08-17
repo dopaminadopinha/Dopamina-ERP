@@ -1238,26 +1238,33 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
 
   async function addArea(event: React.FormEvent) {
     event.preventDefault();
+    setError("");
     const name = newName.trim();
-    if (!name || saving) return;
-    setSaving(true); setError("");
-    const nextSortOrder = areas.reduce((max, area) => Math.max(max, area.sort_order), 0) + 1;
-    const baseSlug = slugify(name);
-    let slug = baseSlug;
-    let attempt = 0;
-    for (;;) {
-      const { error: insertError } = await supabase.from("areas").insert({ business_id: Number(businessId), name, slug, sort_order: nextSortOrder });
-      if (!insertError) break;
-      attempt += 1;
-      if (insertError.code === "23505" && attempt < 5) { slug = `${baseSlug}-${attempt}`; continue; }
-      setError(`Não foi possível adicionar o setor: ${insertError.message}`);
+    if (!name) return setError("Informe um nome para o setor.");
+    if (saving) return;
+    setSaving(true);
+    try {
+      const nextSortOrder = areas.reduce((max, area) => Math.max(max, area.sort_order), 0) + 1;
+      const baseSlug = slugify(name);
+      let slug = baseSlug;
+      let attempt = 0;
+      for (;;) {
+        const { error: insertError } = await supabase.from("areas").insert({ business_id: Number(businessId), name, slug, sort_order: nextSortOrder });
+        if (!insertError) break;
+        attempt += 1;
+        if (insertError.code === "23505" && attempt < 5) { slug = `${baseSlug}-${attempt}`; continue; }
+        setError(`Não foi possível adicionar o setor: ${insertError.message}`);
+        return;
+      }
+      setNewName("");
+      await load();
+      await onAreasChanged();
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : "Erro inesperado.";
+      setError(`Não foi possível adicionar o setor: ${message}`);
+    } finally {
       setSaving(false);
-      return;
     }
-    setNewName("");
-    setSaving(false);
-    await load();
-    await onAreasChanged();
   }
 
   async function toggleActive(area: FullArea) {
@@ -1289,7 +1296,7 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
   return <>
     <form className="module-toolbar catalog-toolbar area-toolbar" onSubmit={addArea}>
       <label><ClipboardList size={16} /><input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Nome do novo setor" /></label>
-      <button type="submit" className="area-add-button" disabled={saving || !newName.trim()}>{saving ? "Adicionando..." : "Adicionar setor"}</button>
+      <button type="submit" className="area-add-button" disabled={saving}>{saving ? "Adicionando..." : "Adicionar setor"}</button>
       <span className="table-count">{areas.length} setor(es)</span>
     </form>
     {error && <p className="catalog-assignment-message" role="status">{error}</p>}
