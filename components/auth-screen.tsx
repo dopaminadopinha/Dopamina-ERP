@@ -144,19 +144,13 @@ export function AuthScreen() {
         <div className="brand-content">
           <div className="brand-mark">
             <Image
-              src="/dopamina-mascot.svg"
-              alt="Mascote do Dopamina Gastrobar"
-              width={340}
-              height={220}
+              src="/dopamina-mascot.png"
+              alt="Dopamina Gastrobar"
+              width={420}
+              height={280}
               priority
               unoptimized
             />
-          </div>
-          <div className="brand-wordmark">
-            <span className="brand-word">
-              D<span className="accent-o">O</span>PAMINA
-            </span>
-            <span className="brand-subword">GASTROBAR</span>
           </div>
         </div>
       </section>
