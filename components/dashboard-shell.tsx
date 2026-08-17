@@ -1129,7 +1129,7 @@ function CatalogPage(props: Parameters<typeof SectionContent>[0]) {
   const [editing, setEditing] = useState<CatalogItem | null>(null);
   const [editingIngredient, setEditingIngredient] = useState<CatalogItem | "new" | null>(null);
   const [query, setQuery] = useState("");
-  const [view, setView] = useState<"products" | "ingredients">("products");
+  const [view, setView] = useState<"products" | "ingredients" | "areas">("products");
   const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "cost" | "recipe">("all");
   const [sectorFilter, setSectorFilter] = useState<"all" | "unassigned" | ProductSectorKey>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
@@ -1182,16 +1182,132 @@ function CatalogPage(props: Parameters<typeof SectionContent>[0]) {
     <div className="section-kpis catalog-kpis"><MiniKpi label="Produtos" value={String(props.data.catalogItems.length)} /><MiniKpi label="Ligados à Zig" value={String(linked)} /><MiniKpi label="Sem setor" value={String(missingSector)} /><MiniKpi label="Falta custo" value={String(missingCost)} /><MiniKpi label="Falta ficha" value={String(missingRecipe)} /></div>
     {missingSector > 0 && <div className="data-warning sector-classification-warning"><TriangleAlert size={19} /><div><strong>{missingSector} produto(s) ainda estão sem setor</strong><span>Classifique-os como Bar, Drinks, Cozinha ou Churrasqueira para tornar as análises de vendas, CMV e rentabilidade mais confiáveis.</span></div><button type="button" onClick={() => { setView("products"); setSectorFilter("unassigned"); }}>Ver pendentes</button></div>}
     {(missingCost + missingRecipe) > 0 && <div className="data-warning"><TriangleAlert size={19} /><div><strong>{missingCost + missingRecipe} cadastro(s) precisam de atenção</strong><span>O CMV só usa valores comprovados. Complete o custo ou a ficha técnica para aumentar a cobertura.</span></div></div>}
-    <div className="catalog-tabs" role="tablist" aria-label="Tipo de cadastro"><button type="button" role="tab" aria-selected={view === "products"} className={view === "products" ? "active" : ""} onClick={() => setView("products")}><PackageSearch size={16} /> Produtos <span>{props.data.catalogItems.length}</span></button><button type="button" role="tab" aria-selected={view === "ingredients"} className={view === "ingredients" ? "active" : ""} onClick={() => { setView("ingredients"); setSelectedIds(new Set()); }}><Boxes size={16} /> Ingredientes <span>{props.data.ingredients.length}</span></button></div>
+    <div className="catalog-tabs" role="tablist" aria-label="Tipo de cadastro"><button type="button" role="tab" aria-selected={view === "products"} className={view === "products" ? "active" : ""} onClick={() => setView("products")}><PackageSearch size={16} /> Produtos <span>{props.data.catalogItems.length}</span></button><button type="button" role="tab" aria-selected={view === "ingredients"} className={view === "ingredients" ? "active" : ""} onClick={() => { setView("ingredients"); setSelectedIds(new Set()); }}><Boxes size={16} /> Ingredientes <span>{props.data.ingredients.length}</span></button><button type="button" role="tab" aria-selected={view === "areas"} className={view === "areas" ? "active" : ""} onClick={() => { setView("areas"); setSelectedIds(new Set()); }}><CircleDollarSign size={16} /> Setores</button></div>
+    {view === "areas" ? <AreasManager businessId={props.businessId} onAreasChanged={props.onRefresh} /> : <>
     <div className="module-toolbar catalog-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={view === "products" ? "Buscar produto, SKU, categoria ou setor" : "Buscar ingrediente"} /></label>{view === "products" && <><select value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value as typeof sectorFilter)} aria-label="Filtrar por setor"><option value="all">Todos os setores</option><option value="unassigned">Sem setor ({missingSector})</option>{PRODUCT_SECTORS.map((sector) => <option key={sector.key} value={sector.key}>{sector.label}</option>)}</select><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} aria-label="Filtrar por status"><option value="all">Todos os status</option><option value="ready">Prontos</option><option value="cost">Falta custo</option><option value="recipe">Falta ficha técnica</option></select></>}<span className="table-count">{rows.length} cadastro(s)</span></div>
     {view === "products" && selectedIds.size > 0 && <div className="bulk-sector-bar"><div><strong>{selectedIds.size} produto(s) selecionados</strong><span>Escolha um setor para aplicar a todos de uma vez.</span></div><select value={bulkSector} onChange={(event) => setBulkSector(event.target.value as typeof bulkSector)} aria-label="Setor para classificação em massa"><option value="unassigned">Sem setor</option>{sectorAreas.map((sector) => <option key={sector.key} value={sector.key}>{sector.label}</option>)}</select><button type="button" disabled={assigningSector} onClick={() => assignSector([...selectedIds], bulkSector)}>{assigningSector ? "Salvando..." : "Aplicar setor"}</button><button type="button" className="bulk-clear" onClick={() => setSelectedIds(new Set())}>Limpar seleção</button></div>}
     {assignmentMessage && <p className="catalog-assignment-message" role="status">{assignmentMessage}</p>}
     <div className="data-table-card"><div className={`responsive-table catalog-table ${view === "products" ? "catalog-products-table" : "catalog-ingredients-table"}`}>
       {view === "products" ? <><div className="table-row table-header"><label className="catalog-check"><input type="checkbox" checked={rows.length > 0 && rows.every((item) => selectedIds.has(String(item.id)))} onChange={(event) => toggleVisible(event.target.checked)} aria-label="Selecionar todos os produtos visíveis" /></label><span>Produto</span><span>Categoria</span><span>Setor</span><span>Tipo</span><span>Preço</span><span>Custo</span><span>Status</span><span></span></div>{rows.length ? rows.map((item) => { const cost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0); const status = statusOf(item); const sector = productSectorKey(nested(item.areas)?.name); return <div className="table-row" key={item.id}><label className="catalog-check"><input type="checkbox" checked={selectedIds.has(String(item.id))} onChange={(event) => toggleSelected(String(item.id), event.target.checked)} aria-label={`Selecionar ${item.name}`} /></label><strong>{item.name}<small className="sku-hint">{item.sku || (item.zig_product_id ? "Zig conectada" : "Cadastro manual")}</small></strong><span>{nested(item.categories)?.name ?? "Sem categoria"}</span><select className={`product-sector-select ${sector ? "assigned" : "unassigned"}`} value={sector ?? "unassigned"} disabled={assigningSector} onChange={(event) => assignSector([String(item.id)], event.target.value as "unassigned" | ProductSectorKey)} aria-label={`Setor de ${item.name}`}><option value="unassigned">Sem setor</option>{sectorAreas.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select><span>{item.costing_method === "recipe" ? "Preparado" : "Simples"}</span><span>{item.sale_price === null ? "—" : MONEY.format(Number(item.sale_price))}</span><strong>{cost > 0 ? MONEY.format(cost) : "—"}</strong><span className={`cost-badge ${status === "ready" ? "known" : "missing"}`}>{status === "ready" ? "Pronto" : status === "recipe" ? "Falta ficha" : "Falta custo"}</span><span className="row-actions"><button onClick={() => setEditing(item)} aria-label={`Editar ${item.name}`}><Pencil size={15} /></button></span></div>; }) : <EmptyMini text="Nenhum produto encontrado." />}</> : <><div className="table-row table-header"><span>Ingrediente</span><span>Categoria</span><span>Unidade</span><span>Uso</span><span>Custo vigente</span><span>Status</span><span></span></div>{rows.length ? rows.map((item) => { const cost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0); return <div className="table-row" key={item.id}><strong>{item.name}<small className="sku-hint">{item.sku || "Cadastro manual"}</small></strong><span>{nested(item.categories)?.name ?? "Sem categoria"}</span><span>{item.consumption_unit}</span><span>Por ficha</span><strong>{cost > 0 ? MONEY.format(cost) : "—"}</strong><span className={`cost-badge ${cost > 0 ? "known" : "missing"}`}>{cost > 0 ? "Pronto" : "Falta custo"}</span><span className="row-actions"><button onClick={() => setEditingIngredient(item)} aria-label={`Editar ${item.name}`}><Pencil size={15} /></button></span></div>; }) : <EmptyMini text="Nenhum ingrediente cadastrado. Use “Novo ingrediente” para começar uma ficha técnica." />}</>}
     </div></div>
+    </>}
     {editing && <ProductEditorModal businessId={props.businessId} item={editing} data={props.data} onClose={() => setEditing(null)} onRefresh={props.onRefresh} />}
     {editingIngredient && <IngredientModal businessId={props.businessId} item={editingIngredient === "new" ? null : editingIngredient} onClose={() => setEditingIngredient(null)} onSaved={async () => { await props.onRefresh(); setEditingIngredient(null); }} />}
   </section>;
+}
+
+type FullArea = { id: string; name: string; slug: string; is_active: boolean; sort_order: number };
+
+function slugify(value: string) {
+  return value
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "setor";
+}
+
+function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAreasChanged: () => Promise<void> }) {
+  const [areas, setAreas] = useState<FullArea[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [newName, setNewName] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+
+  async function load() {
+    setLoading(true);
+    const { data } = await supabase.from("areas").select("id,name,slug,is_active,sort_order").eq("business_id", businessId).order("sort_order").order("name");
+    setAreas((data ?? []) as FullArea[]);
+    setLoading(false);
+  }
+  useEffect(() => {
+    let cancelled = false;
+    async function initialLoad() {
+      setLoading(true);
+      const { data } = await supabase.from("areas").select("id,name,slug,is_active,sort_order").eq("business_id", businessId).order("sort_order").order("name");
+      if (cancelled) return;
+      setAreas((data ?? []) as FullArea[]);
+      setLoading(false);
+    }
+    void initialLoad();
+    return () => { cancelled = true; };
+  }, [businessId]);
+
+  async function addArea(event: React.FormEvent) {
+    event.preventDefault();
+    const name = newName.trim();
+    if (!name || saving) return;
+    setSaving(true); setError("");
+    const nextSortOrder = areas.reduce((max, area) => Math.max(max, area.sort_order), 0) + 1;
+    const baseSlug = slugify(name);
+    let slug = baseSlug;
+    let attempt = 0;
+    for (;;) {
+      const { error: insertError } = await supabase.from("areas").insert({ business_id: Number(businessId), name, slug, sort_order: nextSortOrder });
+      if (!insertError) break;
+      attempt += 1;
+      if (insertError.code === "23505" && attempt < 5) { slug = `${baseSlug}-${attempt}`; continue; }
+      setError("Não foi possível adicionar o setor. Tente novamente.");
+      setSaving(false);
+      return;
+    }
+    setNewName("");
+    setSaving(false);
+    await load();
+    await onAreasChanged();
+  }
+
+  async function toggleActive(area: FullArea) {
+    const { error: updateError } = await supabase.from("areas").update({ is_active: !area.is_active }).eq("id", area.id).eq("business_id", businessId);
+    if (!updateError) { await load(); await onAreasChanged(); }
+  }
+
+  function startEdit(area: FullArea) { setEditingId(area.id); setEditingName(area.name); }
+
+  async function saveEdit(area: FullArea) {
+    const name = editingName.trim();
+    if (!name) return;
+    const { error: updateError } = await supabase.from("areas").update({ name }).eq("id", area.id).eq("business_id", businessId);
+    if (!updateError) { setEditingId(null); await load(); await onAreasChanged(); }
+  }
+
+  async function removeArea(area: FullArea) {
+    if (!confirm(`Excluir o setor "${area.name}"? Produtos, despesas e metas vinculados a ele ficarão sem setor definido — nada mais será apagado.`)) return;
+    const { error: deleteError } = await supabase.from("areas").delete().eq("id", area.id).eq("business_id", businessId);
+    if (!deleteError) { await load(); await onAreasChanged(); }
+  }
+
+  return <>
+    <form className="module-toolbar catalog-toolbar" onSubmit={addArea}>
+      <label><ClipboardList size={16} /><input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Nome do novo setor" /></label>
+      <button type="submit" disabled={saving || !newName.trim()}>{saving ? "Adicionando..." : "Adicionar setor"}</button>
+      <span className="table-count">{areas.length} setor(es)</span>
+    </form>
+    {error && <p className="catalog-assignment-message" role="status">{error}</p>}
+    <div className="data-table-card"><div className="responsive-table areas-table">
+      <div className="table-row table-header"><span>Setor</span><span>Status</span><span></span></div>
+      {loading ? <div className="empty-mini"><p>Carregando setores...</p></div> : areas.length ? areas.map((area) => (
+        <div className="table-row" key={area.id}>
+          {editingId === area.id
+            ? <span className="area-edit-field"><input value={editingName} onChange={(event) => setEditingName(event.target.value)} autoFocus onKeyDown={(event) => { if (event.key === "Enter") saveEdit(area); if (event.key === "Escape") setEditingId(null); }} /></span>
+            : <strong>{area.name}</strong>}
+          <span className={`status-badge ${area.is_active ? "completed" : "draft"}`}>{area.is_active ? "Ativo" : "Inativo"}</span>
+          <span className="row-actions">
+            {editingId === area.id ? <>
+              <button onClick={() => saveEdit(area)} aria-label="Salvar nome"><CheckCircle2 size={15} /></button>
+              <button onClick={() => setEditingId(null)} aria-label="Cancelar edição"><X size={15} /></button>
+            </> : <>
+              <button onClick={() => startEdit(area)} aria-label={`Renomear ${area.name}`}><Pencil size={15} /></button>
+              <button className="area-toggle" onClick={() => toggleActive(area)}>{area.is_active ? "Desativar" : "Ativar"}</button>
+              <button onClick={() => removeArea(area)} aria-label={`Excluir ${area.name}`}><Trash2 size={15} /></button>
+            </>}
+          </span>
+        </div>
+      )) : <EmptyMini text="Nenhum setor cadastrado ainda." />}
+    </div></div>
+  </>;
 }
 
 type RecipeDraftItem = { ingredientId: string; quantity: string; waste: string };
