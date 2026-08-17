@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight, ArrowUpRight, BarChart3, Boxes, CalendarRange,
   CheckCircle2, ChefHat, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, FileBarChart2, FileSpreadsheet,
-  FileUp, LayoutDashboard, LogOut, Menu, PackageSearch, Pencil,
+  FileUp, LayoutDashboard, LogOut, Menu, MoreHorizontal, PackageSearch, Pencil,
   Plus, ReceiptText, Search, Settings, ShoppingBasket, ShoppingCart, Sparkles, Trash2, TrendingUp, TriangleAlert,
   UsersRound, WalletCards, X,
 } from "lucide-react";
@@ -1215,6 +1215,7 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
   const [error, setError] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -1249,7 +1250,7 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
       if (!insertError) break;
       attempt += 1;
       if (insertError.code === "23505" && attempt < 5) { slug = `${baseSlug}-${attempt}`; continue; }
-      setError("Não foi possível adicionar o setor. Tente novamente.");
+      setError(`Não foi possível adicionar o setor: ${insertError.message}`);
       setSaving(false);
       return;
     }
@@ -1260,8 +1261,10 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
   }
 
   async function toggleActive(area: FullArea) {
+    setError("");
     const { error: updateError } = await supabase.from("areas").update({ is_active: !area.is_active }).eq("id", area.id).eq("business_id", businessId);
-    if (!updateError) { await load(); await onAreasChanged(); }
+    if (updateError) return setError(`Não foi possível atualizar o setor: ${updateError.message}`);
+    await load(); await onAreasChanged();
   }
 
   function startEdit(area: FullArea) { setEditingId(area.id); setEditingName(area.name); }
@@ -1269,20 +1272,24 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
   async function saveEdit(area: FullArea) {
     const name = editingName.trim();
     if (!name) return;
+    setError("");
     const { error: updateError } = await supabase.from("areas").update({ name }).eq("id", area.id).eq("business_id", businessId);
-    if (!updateError) { setEditingId(null); await load(); await onAreasChanged(); }
+    if (updateError) return setError(`Não foi possível renomear o setor: ${updateError.message}`);
+    setEditingId(null); await load(); await onAreasChanged();
   }
 
   async function removeArea(area: FullArea) {
     if (!confirm(`Excluir o setor "${area.name}"? Produtos, despesas e metas vinculados a ele ficarão sem setor definido — nada mais será apagado.`)) return;
+    setError("");
     const { error: deleteError } = await supabase.from("areas").delete().eq("id", area.id).eq("business_id", businessId);
-    if (!deleteError) { await load(); await onAreasChanged(); }
+    if (deleteError) return setError(`Não foi possível excluir o setor: ${deleteError.message}`);
+    await load(); await onAreasChanged();
   }
 
   return <>
-    <form className="module-toolbar catalog-toolbar" onSubmit={addArea}>
+    <form className="module-toolbar catalog-toolbar area-toolbar" onSubmit={addArea}>
       <label><ClipboardList size={16} /><input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Nome do novo setor" /></label>
-      <button type="submit" disabled={saving || !newName.trim()}>{saving ? "Adicionando..." : "Adicionar setor"}</button>
+      <button type="submit" className="area-add-button" disabled={saving || !newName.trim()}>{saving ? "Adicionando..." : "Adicionar setor"}</button>
       <span className="table-count">{areas.length} setor(es)</span>
     </form>
     {error && <p className="catalog-assignment-message" role="status">{error}</p>}
@@ -1294,16 +1301,24 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
             ? <span className="area-edit-field"><input value={editingName} onChange={(event) => setEditingName(event.target.value)} autoFocus onKeyDown={(event) => { if (event.key === "Enter") saveEdit(area); if (event.key === "Escape") setEditingId(null); }} /></span>
             : <strong>{area.name}</strong>}
           <span className={`status-badge ${area.is_active ? "completed" : "draft"}`}>{area.is_active ? "Ativo" : "Inativo"}</span>
-          <span className="row-actions">
-            {editingId === area.id ? <>
+          {editingId === area.id ? (
+            <span className="row-actions">
               <button onClick={() => saveEdit(area)} aria-label="Salvar nome"><CheckCircle2 size={15} /></button>
               <button onClick={() => setEditingId(null)} aria-label="Cancelar edição"><X size={15} /></button>
-            </> : <>
-              <button onClick={() => startEdit(area)} aria-label={`Renomear ${area.name}`}><Pencil size={15} /></button>
-              <button className="area-toggle" onClick={() => toggleActive(area)}>{area.is_active ? "Desativar" : "Ativar"}</button>
-              <button onClick={() => removeArea(area)} aria-label={`Excluir ${area.name}`}><Trash2 size={15} /></button>
-            </>}
-          </span>
+            </span>
+          ) : (
+            <span className="row-actions area-actions">
+              <button onClick={() => setOpenMenuId(openMenuId === area.id ? null : area.id)} aria-label={`Ações de ${area.name}`} aria-haspopup="true" aria-expanded={openMenuId === area.id}><MoreHorizontal size={16} /></button>
+              {openMenuId === area.id && <>
+                <button type="button" className="area-menu-backdrop" aria-label="Fechar menu" onClick={() => setOpenMenuId(null)} />
+                <div className="area-menu" role="menu">
+                  <button role="menuitem" onClick={() => { startEdit(area); setOpenMenuId(null); }}><Pencil size={14} /> Renomear</button>
+                  <button role="menuitem" onClick={() => { toggleActive(area); setOpenMenuId(null); }}>{area.is_active ? <X size={14} /> : <CheckCircle2 size={14} />} {area.is_active ? "Desativar" : "Ativar"}</button>
+                  <button role="menuitem" className="danger" onClick={() => { removeArea(area); setOpenMenuId(null); }}><Trash2 size={14} /> Excluir</button>
+                </div>
+              </>}
+            </span>
+          )}
         </div>
       )) : <EmptyMini text="Nenhum setor cadastrado ainda." />}
     </div></div>
