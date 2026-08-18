@@ -30,11 +30,10 @@ type Profile = { full_name: string; email: string };
 type Sale = { id: string; import_id: string | null; period_start: string | null; period_end: string | null; business_date: string; gross_amount: number; discount_amount: number; product_gross_amount: number; service_amount: number; revenue_amount: number | null; closing_net_amount: number | null; open_accounts_amount: number; recharge_balance_amount: number; sales_imports: { file_name: string; row_count: number; created_at: string } | { file_name: string; row_count: number; created_at: string }[] | null };
 type SaleItem = { id: string; sale_id: string; quantity: number; gross_amount: number; discount_amount: number; transaction_type: string | null; items: { name: string; sku: string | null; categories: { name: string } | { name: string }[] | null } | { name: string; sku: string | null; categories: { name: string } | { name: string }[] | null }[]; areas: { name: string } | { name: string }[] | null };
 type PaymentMethod = { id: string; import_id: string; payment_method: string; amount: number; percentage: number | null };
-type Expense = { id: string; purchase_id: string | null; source_type: string | null; source_id: string | null; recurrence_end: string | null; area_id: string | null; category: string; description: string; expense_date: string; due_date: string | null; paid_at: string | null; amount: number; payment_method: string | null; status: "draft" | "pending" | "completed" | "cancelled"; is_recurring: boolean; cost_behavior: "fixed" | "variable"; areas: { name: string } | { name: string }[] | null };
+type Expense = { id: string; purchase_id: string | null; source_type: string | null; source_id: string | null; recurrence_end: string | null; area_id: string | null; category: string; description: string; expense_date: string; due_date: string | null; paid_at: string | null; amount: number; payment_method: string | null; status: "draft" | "pending" | "completed" | "cancelled"; is_recurring: boolean; cost_behavior: "fixed" | "variable"; areas: { name: string; is_operational: boolean } | { name: string; is_operational: boolean }[] | null };
 type ImportRow = { id: string; file_name: string; period_start: string | null; period_end: string | null; row_count: number; status: string; created_at: string };
-type Area = { id: string; name: string };
-type ProductSectorKey = "bar" | "drinks" | "cozinha" | "churrasqueira";
-type CatalogItem = { id: string; area_id: string | null; name: string; sku: string | null; item_type: "ingredient" | "product" | "consumable"; purchase_unit: string | null; consumption_unit: string; costing_method: "simple" | "recipe"; sale_price: number | null; latest_unit_cost: number | null; average_unit_cost: number | null; minimum_stock: number; is_active: boolean; zig_product_id: string | null; categories: { name: string } | { name: string }[] | null; areas: { id: string; name: string } | { id: string; name: string }[] | null };
+type Area = { id: string; name: string; is_operational: boolean };
+type CatalogItem = { id: string; area_id: string | null; name: string; sku: string | null; item_type: "ingredient" | "product" | "consumable"; purchase_unit: string | null; consumption_unit: string; costing_method: "simple" | "recipe"; sale_price: number | null; latest_unit_cost: number | null; average_unit_cost: number | null; minimum_stock: number; is_active: boolean; zig_product_id: string | null; categories: { name: string } | { name: string }[] | null; areas: { id: string; name: string; is_operational: boolean } | { id: string; name: string; is_operational: boolean }[] | null };
 type CostHistory = { id: string; item_id: string; unit_cost: number; effective_from: string; source: "manual" | "recipe" | "import" | "purchase"; created_at: string };
 type Recipe = { id: string; product_id: string; yield_quantity: number; notes: string | null; effective_from: string; created_at: string };
 type RecipeItem = { id: string; recipe_id: string; ingredient_id: string; quantity: number; waste_percentage: number };
@@ -52,7 +51,7 @@ type ZigDashboard = {
   daily: { operational_date: string; net_cents: number; transaction_count: number }[];
   sync: { endpoint: string; status: string; last_success_at: string | null; last_successful_date: string | null; error_message: string | null }[];
 };
-type SectorProduct = { sector: "Bar" | "Drinks" | "Cozinha" | "Churrasqueira" | null; source_area: string; item_id: string | null; name: string; sku: string | null; category: string | null; quantity: number; revenue_cents: number; costed_quantity: number; missing_cost_quantity: number; known_revenue_cents: number; known_cmv: number | null };
+type SectorProduct = { sector: string | null; source_area: string; item_id: string | null; name: string; sku: string | null; category: string | null; quantity: number; revenue_cents: number; costed_quantity: number; missing_cost_quantity: number; known_revenue_cents: number; known_cmv: number | null };
 type SectorProfitability = { period_start: string; period_end: string; products: SectorProduct[] };
 type ProductCostStatus = "known" | "partial" | "missing";
 type ProductPerformance = "star" | "attention" | "opportunity" | "low" | "unknown";
@@ -73,12 +72,6 @@ const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const NUMBER = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const DATE = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
-const PRODUCT_SECTORS: { key: ProductSectorKey; label: string }[] = [
-  { key: "bar", label: "Bar" },
-  { key: "drinks", label: "Drinks" },
-  { key: "cozinha", label: "Cozinha" },
-  { key: "churrasqueira", label: "Churrasqueira" },
-];
 const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: "visao-geral", label: "Visão geral", icon: <LayoutDashboard size={19} /> },
   { id: "insights", label: "Insights", icon: <Sparkles size={19} /> },
@@ -97,14 +90,6 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
 ];
 
 function nested<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
-function productSectorKey(areaName: string | null | undefined): ProductSectorKey | null {
-  const normalized = areaName?.trim().toLocaleLowerCase("pt-BR");
-  if (normalized === "bar" || normalized === "cerveja") return "bar";
-  if (normalized === "drinks") return "drinks";
-  if (normalized === "cozinha") return "cozinha";
-  if (normalized === "churrasqueira") return "churrasqueira";
-  return null;
-}
 function dateLabel(value: string | null) { return value ? DATE.format(new Date(`${value}T00:00:00Z`)) : "—"; }
 function isoInSaoPaulo(date = new Date()) { const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date); const value = Object.fromEntries(parts.map((part) => [part.type, part.value])); return `${value.year}-${value.month}-${value.day}`; }
 function shiftDate(date: string, days: number) { const value = new Date(`${date}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10); }
@@ -137,10 +122,10 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
   const previousRange = previousEquivalentRange(range);
   const [sales, expenses, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig, previousZig, sectorProfitability, previousSectorProfitability, costHistory, recipes] = await Promise.all([
     supabase.from("sales").select("id,import_id,period_start,period_end,business_date,gross_amount,discount_amount,product_gross_amount,service_amount,revenue_amount,closing_net_amount,open_accounts_amount,recharge_balance_amount,sales_imports(file_name,row_count,created_at)").eq("business_id", businessId).order("business_date", { ascending: false }),
-    supabase.from("expenses").select("id,purchase_id,source_type,source_id,recurrence_end,area_id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring,cost_behavior,areas(name)").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
-    supabase.from("items").select("id,area_id,name,sku,item_type,purchase_unit,consumption_unit,costing_method,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(id,name)").eq("business_id", businessId).order("name"),
+    supabase.from("expenses").select("id,purchase_id,source_type,source_id,recurrence_end,area_id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring,cost_behavior,areas(name,is_operational)").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
+    supabase.from("items").select("id,area_id,name,sku,item_type,purchase_unit,consumption_unit,costing_method,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(id,name,is_operational)").eq("business_id", businessId).order("name"),
     supabase.from("suppliers").select("id", { count: "exact", head: true }).eq("business_id", businessId),
-    supabase.from("areas").select("id,name").eq("business_id", businessId).eq("is_active", true).order("sort_order"),
+    supabase.from("areas").select("id,name,is_operational").eq("business_id", businessId).eq("is_active", true).order("sort_order"),
     supabase.from("forecasts").select("id,area_id,forecast_type,period_start,period_end,amount,notes,areas(name)").eq("business_id", businessId).order("period_start", { ascending: false }),
     supabase.from("sales_imports").select("id,file_name,period_start,period_end,row_count,status,created_at").eq("business_id", businessId).order("created_at", { ascending: false }),
     supabase.from("zig_profitability_imports").select("id,sale_id,period_start,period_end,source_revenue,known_cost_total,row_count,missing_cost_count,created_at").eq("business_id", businessId).order("period_end", { ascending: false }),
@@ -377,16 +362,20 @@ function computeDreSummary(zig: ZigDashboard, catalogItems: CatalogItem[], allEx
 }
 function pctChange(current: number | null, previous: number | null) { if (current === null || previous === null || previous === 0) return null; return (current - previous) / Math.abs(previous); }
 
-type SectorResult = { name: SectorName; revenue: number; share: number; knownRevenue: number; cmv: number; grossProfit: number; pessoal: number; opex: number; result: number; margin: number | null };
-function computeSectorResults(sourceProducts: SectorProduct[], expenses: Expense[], range: DateRange): SectorResult[] {
+type SectorResult = { name: string; revenue: number; share: number; knownRevenue: number; cmv: number; grossProfit: number; pessoal: number; opex: number; result: number; margin: number | null };
+function operationalAreaName(area: { name: string; is_operational: boolean } | null | undefined): string | null {
+  return area?.is_operational ? area.name : null;
+}
+function computeSectorResults(sourceProducts: SectorProduct[], expenses: Expense[], range: DateRange, operationalAreas: Area[]): SectorResult[] {
   const totalRevenue = sourceProducts.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
-  return SECTOR_NAMES.map((name) => {
+  return operationalAreas.map((area) => {
+    const name = area.name;
     const products = sourceProducts.filter((product) => product.sector === name);
     const revenue = products.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
     const knownRevenue = products.reduce((sum, product) => sum + Number(product.known_revenue_cents) / 100, 0);
     const cmv = products.reduce((sum, product) => sum + Number(product.known_cmv ?? 0), 0);
     const grossProfit = knownRevenue - cmv;
-    const sectorExpenses = expenses.filter((expense) => sectorNameForSource(nested(expense.areas)?.name) === name);
+    const sectorExpenses = expenses.filter((expense) => operationalAreaName(nested(expense.areas)) === name);
     const pessoal = sectorExpenses.filter((expense) => expense.source_type === "work_shift" || expense.source_type === "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
     const opex = sectorExpenses.filter((expense) => expense.source_type !== "work_shift" && expense.source_type !== "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
     const result = grossProfit - pessoal - opex;
@@ -414,9 +403,10 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
   const resultChange = pctChange(current.operatingResult, previous.operatingResult);
   const pessoalChange = pctChange(current.pessoal, previous.pessoal);
 
-  const sectorResults = useMemo(() => computeSectorResults(props.data.sectorProfitability.products, props.data.expenses, range), [props.data.sectorProfitability, props.data.expenses, range]);
+  const operationalAreas = useMemo(() => props.data.areas.filter((area) => area.is_operational), [props.data.areas]);
+  const sectorResults = useMemo(() => computeSectorResults(props.data.sectorProfitability.products, props.data.expenses, range, operationalAreas), [props.data.sectorProfitability, props.data.expenses, range, operationalAreas]);
   const sectorTotal = sectorResults.reduce((sum, row) => sum + row.result, 0);
-  const generalExpenses = props.data.expenses.filter((expense) => sectorNameForSource(nested(expense.areas)?.name) === null && !expense.purchase_id);
+  const generalExpenses = props.data.expenses.filter((expense) => operationalAreaName(nested(expense.areas)) === null && !expense.purchase_id);
   const generalPessoal = generalExpenses.filter((expense) => expense.source_type === "work_shift" || expense.source_type === "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
   const generalOpex = generalExpenses.filter((expense) => expense.source_type !== "work_shift" && expense.source_type !== "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
   const generalTotal = generalPessoal + generalOpex;
@@ -497,7 +487,7 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
     </div>
 
     <article className="chart-card dre-sector-card">
-      <div className="card-title-row"><div><p>Resultado por setor</p><h3>Bar, Drinks, Cozinha e Churrasqueira</h3></div><span>Custos gerais não são rateados entre setores</span></div>
+      <div className="card-title-row"><div><p>Resultado por setor</p><h3>{operationalAreas.length ? operationalAreas.map((area) => area.name).join(", ") : "Nenhum setor operacional"}</h3></div><span>Custos gerais não são rateados entre setores</span></div>
       <div className="data-table-card dre-sector-table-card"><div className="responsive-table dre-sector-table"><div className="table-row table-header"><span>Setor</span><span>Receita</span><span>CMV</span><span>Lucro bruto</span><span>Pessoal</span><span>Despesas</span><span>Resultado</span><span>Margem</span></div>
         {sectorResults.map((row) => <div className="table-row" key={row.name}><strong>{row.name}</strong><span>{row.revenue > 0 ? MONEY.format(row.revenue) : "—"}</span><span>{row.knownRevenue > 0 ? MONEY.format(row.cmv) : "—"}</span><span>{row.knownRevenue > 0 ? MONEY.format(row.grossProfit) : "—"}</span><span>{row.pessoal > 0 ? MONEY.format(row.pessoal) : "—"}</span><span>{row.opex > 0 ? MONEY.format(row.opex) : "—"}</span><strong className={row.result < 0 ? "negative" : ""}>{row.knownRevenue > 0 ? MONEY.format(row.result) : "—"}</strong><span>{row.margin === null ? "—" : `${NUMBER.format(row.margin * 100)}%`}</span></div>)}
       </div></div>
@@ -669,8 +659,9 @@ function InsightsPage(props: Parameters<typeof SectionContent>[0]) {
   const apiHasData = props.data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
   const current = useMemo(() => computeDreSummary(props.data.zig, props.data.catalogItems, props.data.expenses, range, apiHasData, props.data.sales), [props.data.zig, props.data.catalogItems, props.data.expenses, range, apiHasData, props.data.sales]);
   const previous = useMemo(() => computeDreSummary(props.data.previousZig, props.data.catalogItems, props.data.expenses, previousRange, apiHasData, props.data.sales), [props.data.previousZig, props.data.catalogItems, props.data.expenses, previousRange, apiHasData, props.data.sales]);
-  const sectorResults = useMemo(() => computeSectorResults(props.data.sectorProfitability.products, props.data.expenses, range), [props.data.sectorProfitability, props.data.expenses, range]);
-  const previousSectorResults = useMemo(() => computeSectorResults(props.data.previousSectorProfitability.products, props.data.expenses, previousRange), [props.data.previousSectorProfitability, props.data.expenses, previousRange]);
+  const operationalAreas = useMemo(() => props.data.areas.filter((area) => area.is_operational), [props.data.areas]);
+  const sectorResults = useMemo(() => computeSectorResults(props.data.sectorProfitability.products, props.data.expenses, range, operationalAreas), [props.data.sectorProfitability, props.data.expenses, range, operationalAreas]);
+  const previousSectorResults = useMemo(() => computeSectorResults(props.data.previousSectorProfitability.products, props.data.expenses, previousRange, operationalAreas), [props.data.previousSectorProfitability, props.data.expenses, previousRange, operationalAreas]);
 
   const [stock, setStock] = useState<StockDashboard>(EMPTY_STOCK);
   const [priceHistory, setPriceHistory] = useState<PriceHistoryPoint[]>([]);
@@ -732,8 +723,9 @@ function AttentionPanel({ data, range }: { data: DataState; range: DateRange }) 
   const apiHasData = data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
   const current = useMemo(() => computeDreSummary(data.zig, data.catalogItems, data.expenses, range, apiHasData, data.sales), [data.zig, data.catalogItems, data.expenses, range, apiHasData, data.sales]);
   const previous = useMemo(() => computeDreSummary(data.previousZig, data.catalogItems, data.expenses, previousRange, apiHasData, data.sales), [data.previousZig, data.catalogItems, data.expenses, previousRange, apiHasData, data.sales]);
-  const sectorResults = useMemo(() => computeSectorResults(data.sectorProfitability.products, data.expenses, range), [data.sectorProfitability, data.expenses, range]);
-  const previousSectorResults = useMemo(() => computeSectorResults(data.previousSectorProfitability.products, data.expenses, previousRange), [data.previousSectorProfitability, data.expenses, previousRange]);
+  const operationalAreas = useMemo(() => data.areas.filter((area) => area.is_operational), [data.areas]);
+  const sectorResults = useMemo(() => computeSectorResults(data.sectorProfitability.products, data.expenses, range, operationalAreas), [data.sectorProfitability, data.expenses, range, operationalAreas]);
+  const previousSectorResults = useMemo(() => computeSectorResults(data.previousSectorProfitability.products, data.expenses, previousRange, operationalAreas), [data.previousSectorProfitability, data.expenses, previousRange, operationalAreas]);
   const insights = useMemo(() => sortInsights([
     ...buildFinancialInsights(current, previous, sectorResults, previousSectorResults),
     ...buildProductInsights(data.sectorProfitability.products, data.previousSectorProfitability.products),
@@ -836,18 +828,7 @@ function CmvPage(props: Parameters<typeof SectionContent>[0]) {
   </section>;
 }
 
-const SECTOR_NAMES = ["Bar", "Drinks", "Cozinha", "Churrasqueira"] as const;
-type SectorName = typeof SECTOR_NAMES[number];
-type SectorSummary = { name: SectorName; revenue: number; share: number; quantity: number; knownRevenue: number; missingRevenue: number; cmv: number; grossProfit: number; grossMargin: number | null; expenses: number; result: number; resultMargin: number | null; coverage: number; products: SectorProduct[] };
-
-function sectorNameForSource(value: string | null | undefined): SectorName | null {
-  const normalized = (value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toUpperCase();
-  if (normalized.includes("CHURRAS")) return "Churrasqueira";
-  if (normalized.includes("DRINK")) return "Drinks";
-  if (normalized.includes("COZINHA")) return "Cozinha";
-  if (normalized === "BAR" || normalized.includes("CERVEJA")) return "Bar";
-  return null;
-}
+type SectorSummary = { name: string; revenue: number; share: number; quantity: number; knownRevenue: number; missingRevenue: number; cmv: number; grossProfit: number; grossMargin: number | null; expenses: number; result: number; resultMargin: number | null; coverage: number; products: SectorProduct[] };
 
 function operationalExpenseAmount(expense: Expense, range: DateRange) {
   const amount = Number(expense.amount);
@@ -871,18 +852,20 @@ function operationalExpenseAmount(expense: Expense, range: DateRange) {
 }
 
 function SectorProfitabilityPage(props: Parameters<typeof SectionContent>[0]) {
-  const [selectedSector, setSelectedSector] = useState<SectorName>("Bar");
+  const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [productQuery, setProductQuery] = useState("");
   const [assigningExpense, setAssigningExpense] = useState("");
+  const operationalAreas = props.data.areas.filter((area) => area.is_operational);
   const sourceProducts = props.data.sectorProfitability.products;
   const totalRevenue = sourceProducts.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
-  const summaries: SectorSummary[] = SECTOR_NAMES.map((name) => {
+  const summaries: SectorSummary[] = operationalAreas.map((area) => {
+    const name = area.name;
     const products = sourceProducts.filter((product) => product.sector === name);
     const revenue = products.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
     const quantity = products.reduce((sum, product) => sum + Number(product.quantity), 0);
     const knownRevenue = products.reduce((sum, product) => sum + Number(product.known_revenue_cents) / 100, 0);
     const cmv = products.reduce((sum, product) => sum + Number(product.known_cmv ?? 0), 0);
-    const expenses = props.data.expenses.filter((expense) => sectorNameForSource(nested(expense.areas)?.name) === name).reduce((sum, expense) => sum + operationalExpenseAmount(expense, props.range), 0);
+    const expenses = props.data.expenses.filter((expense) => operationalAreaName(nested(expense.areas)) === name).reduce((sum, expense) => sum + operationalExpenseAmount(expense, props.range), 0);
     const grossProfit = knownRevenue - cmv;
     const result = grossProfit - expenses;
     return { name, revenue, share: totalRevenue > 0 ? revenue / totalRevenue : 0, quantity, knownRevenue, missingRevenue: Math.max(0, revenue - knownRevenue), cmv, grossProfit, grossMargin: knownRevenue > 0 ? grossProfit / knownRevenue : null, expenses, result, resultMargin: knownRevenue > 0 ? result / knownRevenue : null, coverage: revenue > 0 ? knownRevenue / revenue : 0, products };
@@ -895,14 +878,14 @@ function SectorProfitabilityPage(props: Parameters<typeof SectionContent>[0]) {
   const highestCmv = activeSectors.length ? activeSectors.reduce((best, row) => row.cmv > best.cmv ? row : best) : null;
   const highestOperationalCost = summaries.some((sector) => sector.expenses > 0) ? summaries.reduce((best, row) => row.expenses > best.expenses ? row : best) : null;
   const worstResult = activeSectors.length ? activeSectors.reduce((worst, row) => row.result < worst.result ? row : worst) : null;
-  const selected = summaries.find((sector) => sector.name === selectedSector) ?? summaries[0];
-  const selectedProducts = [...selected.products].filter((product) => `${product.name} ${product.sku ?? ""} ${product.category ?? ""}`.toLowerCase().includes(productQuery.toLowerCase())).sort((a, b) => Number(b.revenue_cents) - Number(a.revenue_cents));
+  const selected = summaries.find((sector) => sector.name === selectedSector) ?? summaries[0] ?? null;
+  const selectedProducts = selected ? [...selected.products].filter((product) => `${product.name} ${product.sku ?? ""} ${product.category ?? ""}`.toLowerCase().includes(productQuery.toLowerCase())).sort((a, b) => Number(b.revenue_cents) - Number(a.revenue_cents)) : [];
   const unassignedProducts = sourceProducts.filter((product) => product.sector === null);
   const unassignedRevenue = unassignedProducts.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
   const unassignedSources = [...new Set(unassignedProducts.map((product) => product.source_area))];
   const confirmedExpenses = props.expenses.filter((expense) => expense.status === "completed" || expense.status === "pending");
-  const unassignedExpenseTotal = props.data.expenses.filter((expense) => sectorNameForSource(nested(expense.areas)?.name) === null).reduce((sum, expense) => sum + operationalExpenseAmount(expense, props.range), 0);
-  const areaOptions = SECTOR_NAMES.map((sector) => ({ sector, area: props.data.areas.find((area) => sectorNameForSource(area.name) === sector) })).filter((option): option is { sector: SectorName; area: Area } => !!option.area);
+  const unassignedExpenseTotal = props.data.expenses.filter((expense) => operationalAreaName(nested(expense.areas)) === null).reduce((sum, expense) => sum + operationalExpenseAmount(expense, props.range), 0);
+  const areaOptions = operationalAreas.map((area) => ({ sector: area.name, area }));
   async function assignExpense(expense: Expense, areaId: string) {
     setAssigningExpense(expense.id);
     const { error } = await supabase.from("expenses").update({ area_id: areaId ? Number(areaId) : null }).eq("id", expense.id).eq("business_id", Number(props.businessId));
@@ -914,13 +897,14 @@ function SectorProfitabilityPage(props: Parameters<typeof SectionContent>[0]) {
     <div className="sector-insight-grid"><SectorInsight label="Maior faturamento" sector={highestRevenue} value={highestRevenue ? MONEY.format(highestRevenue.revenue) : "—"} tone="green" /><SectorInsight label="Maior lucro bruto" sector={highestProfit} value={highestProfit ? MONEY.format(highestProfit.grossProfit) : "—"} tone="green" /><SectorInsight label="Maior margem do setor" sector={highestMargin} value={highestMargin?.resultMargin === null || !highestMargin ? "—" : `${NUMBER.format(highestMargin.resultMargin * 100)}%`} tone="yellow" /><SectorInsight label="Maior CMV" sector={highestCmv} value={highestCmv ? MONEY.format(highestCmv.cmv) : "—"} tone="red" /><SectorInsight label="Maior custo operacional" sector={highestOperationalCost} value={highestOperationalCost ? MONEY.format(highestOperationalCost.expenses) : "—"} tone="red" /><SectorInsight label="Pior resultado conhecido" sector={worstResult} value={worstResult ? MONEY.format(worstResult.result) : "—"} tone="red" /></div>
     <div className="sector-card-grid">{summaries.map((sector) => <SectorPerformanceCard key={sector.name} sector={sector} active={selectedSector === sector.name} onSelect={() => setSelectedSector(sector.name)} />)}</div>
     <div className="sector-comparison-grid"><article className="sector-panel"><div className="sector-panel-heading"><div><p>Comparação executiva</p><h3>Faturamento, lucro e resultado</h3></div><div className="sector-legend"><span><i className="sector-revenue-dot" />Faturamento</span><span><i className="sector-profit-dot" />Lucro bruto</span><span><i className="sector-result-dot" />Após despesas</span></div></div><SectorComparisonChart rows={summaries} /></article><article className="sector-panel sector-attention"><div className="sector-panel-heading"><div><p>Leitura gerencial</p><h3>Onde olhar primeiro</h3></div></div><SectorAttentionRow label="Maior pressão de CMV" sector={highestCmv} value={highestCmv?.knownRevenue ? `${NUMBER.format(highestCmv.cmv / highestCmv.knownRevenue * 100)}% da receita conhecida` : "Sem CMV conhecido"} /><SectorAttentionRow label="Maior despesa direta" sector={highestOperationalCost} value={highestOperationalCost ? MONEY.format(highestOperationalCost.expenses) : "Sem despesas atribuídas"} /><SectorAttentionRow label="Menor resultado" sector={worstResult} value={worstResult ? MONEY.format(worstResult.result) : "Sem dados"} /><SectorAttentionRow label="Menor cobertura de custo" sector={activeSectors.length ? activeSectors.reduce((worst, row) => row.coverage < worst.coverage ? row : worst) : null} value={activeSectors.length ? `${NUMBER.format(activeSectors.reduce((worst, row) => row.coverage < worst.coverage ? row : worst).coverage * 100)}% do faturamento` : "Sem dados"} /></article></div>
-    <div className="sector-unassigned"><div><span>Faturamento fora dos 4 setores</span><strong>{unassignedProducts.length ? MONEY.format(unassignedRevenue) : "—"}</strong><small>{unassignedProducts.length ? `${unassignedProducts.length} produto(s) · ${unassignedSources.join(", ")}` : "Nenhuma venda não atribuída"}</small></div><div><span>Despesa ainda não atribuída</span><strong>{unassignedExpenseTotal > 0 ? MONEY.format(unassignedExpenseTotal) : "—"}</strong><small>{unassignedExpenseTotal > 0 ? "Permanece geral até classificação segura" : "Nenhuma despesa geral no período"}</small></div><TriangleAlert size={18} /></div>
-    <section className="sector-detail"><div className="sector-detail-head"><div><p>Detalhamento do container</p><h3>{selected.name}</h3><span>{selected.products.length} produto(s) · cobertura de CMV em {NUMBER.format(selected.coverage * 100)}% do faturamento</span></div><div className="sector-tabs" role="tablist" aria-label="Selecionar setor">{SECTOR_NAMES.map((sector) => <button type="button" role="tab" aria-selected={selectedSector === sector} className={selectedSector === sector ? "active" : ""} key={sector} onClick={() => setSelectedSector(sector)}>{sector}</button>)}</div></div>
+    <div className="sector-unassigned"><div><span>Faturamento fora dos setores operacionais</span><strong>{unassignedProducts.length ? MONEY.format(unassignedRevenue) : "—"}</strong><small>{unassignedProducts.length ? `${unassignedProducts.length} produto(s) · ${unassignedSources.join(", ")}` : "Nenhuma venda não atribuída"}</small></div><div><span>Despesa ainda não atribuída</span><strong>{unassignedExpenseTotal > 0 ? MONEY.format(unassignedExpenseTotal) : "—"}</strong><small>{unassignedExpenseTotal > 0 ? "Permanece geral até classificação segura" : "Nenhuma despesa geral no período"}</small></div><TriangleAlert size={18} /></div>
+    {!operationalAreas.length && <div className="data-warning"><TriangleAlert size={19} /><div><strong>Nenhum setor operacional cadastrado</strong><span>Marque ao menos um setor como operacional em Cadastros → Setores para ver a rentabilidade por setor.</span></div></div>}
+    {selected && <section className="sector-detail"><div className="sector-detail-head"><div><p>Detalhamento do container</p><h3>{selected.name}</h3><span>{selected.products.length} produto(s) · cobertura de CMV em {NUMBER.format(selected.coverage * 100)}% do faturamento</span></div><div className="sector-tabs" role="tablist" aria-label="Selecionar setor">{operationalAreas.map((area) => <button type="button" role="tab" aria-selected={selectedSector === area.name} className={selectedSector === area.name ? "active" : ""} key={area.id} onClick={() => setSelectedSector(area.name)}>{area.name}</button>)}</div></div>
       <div className="sector-detail-summary"><div><span>Faturamento</span><strong>{MONEY.format(selected.revenue)}</strong></div><div><span>CMV conhecido</span><strong>{selected.knownRevenue > 0 ? MONEY.format(selected.cmv) : "—"}</strong></div><div><span>Lucro bruto conhecido</span><strong>{selected.knownRevenue > 0 ? MONEY.format(selected.grossProfit) : "—"}</strong></div><div><span>Despesas atribuídas</span><strong>{selected.expenses > 0 ? MONEY.format(selected.expenses) : "—"}</strong></div><div><span>Resultado conhecido</span><strong className={selected.result < 0 ? "negative" : ""}>{selected.knownRevenue > 0 ? MONEY.format(selected.result) : "—"}</strong></div><div><span>Margem do setor</span><strong className={Number(selected.resultMargin) < 0 ? "negative" : ""}>{selected.resultMargin === null ? "—" : `${NUMBER.format(selected.resultMargin * 100)}%`}</strong></div></div>
       {selected.missingRevenue > 0 && <div className="data-warning"><TriangleAlert size={14} /><span><strong>{MONEY.format(selected.missingRevenue)}</strong> do faturamento deste setor ainda não tem CMV confiável e não entra no lucro conhecido.</span></div>}
       <div className="module-toolbar"><label><Search size={16} /><input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder={`Buscar produto de ${selected.name}`} /></label><span className="table-count">{selectedProducts.length} produto(s)</span></div>
       <div className="data-table-card"><div className="responsive-table sector-products-table"><div className="table-row table-header"><span>Produto</span><span>Quantidade</span><span>Faturamento</span><span>CMV conhecido</span><span>Lucro bruto</span><span>Margem</span></div>{selectedProducts.length ? selectedProducts.map((product) => { const knownRevenue = Number(product.known_revenue_cents) / 100; const cmv = Number(product.known_cmv ?? 0); const profit = knownRevenue - cmv; const margin = knownRevenue > 0 ? profit / knownRevenue : null; return <div className="table-row" key={`${product.source_area}-${product.item_id}-${product.name}`}><strong>{product.name}<small className="sku-hint">{product.category || product.sku || "Sem categoria"}</small></strong><span>{NUMBER.format(Number(product.quantity))}</span><strong>{MONEY.format(Number(product.revenue_cents) / 100)}</strong><span>{knownRevenue > 0 ? MONEY.format(cmv) : "—"}</span><strong>{knownRevenue > 0 ? MONEY.format(profit) : "—"}</strong><span>{margin === null ? <small className="cost-badge missing">Sem custo</small> : `${NUMBER.format(margin * 100)}%`}</span></div>; }) : <EmptyMini text="Nenhum produto deste setor no período selecionado." />}</div></div>
-    </section>
+    </section>}
     <section className="sector-expense-assignment"><div className="sector-detail-head"><div><p>Classificação segura</p><h3>Despesas diretamente relacionadas</h3><span>Atribua somente quando a despesa pertencer claramente a um container. Deixe como geral quando houver dúvida.</span></div></div>{confirmedExpenses.length ? <div className="expense-assignment-list">{confirmedExpenses.map((expense) => <div key={expense.id}><span><strong>{expense.description}</strong><small>{expense.category} · {MONEY.format(expense.amount)}</small></span><select aria-label={`Setor da despesa ${expense.description}`} value={expense.area_id ?? ""} disabled={assigningExpense === expense.id} onChange={(event) => assignExpense(expense, event.target.value)}><option value="">Geral / não atribuída</option>{areaOptions.map((option) => <option key={option.sector} value={option.area.id}>{option.sector}</option>)}</select></div>)}</div> : <EmptyMini text="Nenhuma despesa paga ou pendente neste período para classificar." />}</section>
   </section>;
 }
@@ -1019,7 +1003,7 @@ function ProductProfitabilityPage(props: Parameters<typeof SectionContent>[0]) {
     <div className="product-decision-grid"><ProductDecisionCard label="Qual mais dá dinheiro?" row={bestProfit} value={bestProfit?.profit === null || !bestProfit ? "Sem dados confiáveis" : MONEY.format(bestProfit.profit)} note={bestProfit ? `${MONEY.format(bestProfit.revenue)} faturados` : "Complete os custos dos produtos"} tone="green" /><ProductDecisionCard label="Vende muito, lucra pouco" row={attention} value={attention?.margin === null || !attention ? "Nenhum identificado" : `${NUMBER.format(attention.margin * 100)}% de margem`} note={attention ? `${NUMBER.format(attention.quantity)} unidades vendidas` : "No período selecionado"} tone="red" /><ProductDecisionCard label="Deveríamos vender mais" row={opportunity} value={opportunity?.margin === null || !opportunity ? "Nenhum identificado" : `${NUMBER.format(opportunity.margin * 100)}% de margem`} note={opportunity ? `Só ${NUMBER.format(opportunity.quantity)} unidades vendidas` : "No período selecionado"} tone="blue" /><ProductDecisionCard label="Pode precisar de preço" row={priceReview} value={priceReview?.margin === null || !priceReview ? "Nenhum identificado" : `${NUMBER.format(priceReview.margin * 100)}% de margem`} note={priceReview ? `${MONEY.format(priceReview.averagePrice ?? 0)} de preço médio` : "No período selecionado"} tone="yellow" /></div>
     <div className="product-analysis-grid"><article className="product-profit-panel"><div className="product-panel-heading"><div><p>Mapa de desempenho</p><h3>Venda × margem</h3></div><span>Corte: {NUMBER.format(analysis.salesCut)} un. · {NUMBER.format(analysis.marginCut * 100)}% margem</span></div><div className="product-quadrant-grid"><ProductQuadrantCard performance="star" title="Produtos estrela" description="Alta venda + alta margem" rows={quadrant("star")} /><ProductQuadrantCard performance="attention" title="Precisam de atenção" description="Alta venda + baixa margem" rows={quadrant("attention")} /><ProductQuadrantCard performance="opportunity" title="Oportunidade" description="Baixa venda + alta margem" rows={quadrant("opportunity")} /><ProductQuadrantCard performance="low" title="Baixo desempenho" description="Baixa venda + baixa margem" rows={quadrant("low")} /></div></article>
       <article className="product-profit-panel product-alert-panel"><div className="product-panel-heading"><div><p>Alertas automáticos</p><h3>O que revisar primeiro</h3></div><TriangleAlert size={19} /></div>{alerts.length ? <div className="product-alert-list">{alerts.map((alert, index) => <div key={`${alert.row.key}-${alert.label}-${index}`}><span className={`product-alert-dot priority-${alert.priority}`} /><div><strong>{alert.row.name}</strong><span>{alert.label}</span><small>{alert.detail}</small></div></div>)}</div> : <EmptyMini text="Nenhum alerta encontrado no período." />}</article></div>
-    <div className="module-toolbar product-profit-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto, SKU ou categoria" /></label><select value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value)} aria-label="Filtrar por setor"><option value="all">Todos os setores</option><option value="Bar">Bar</option><option value="Drinks">Drinks</option><option value="Cozinha">Cozinha</option><option value="Churrasqueira">Churrasqueira</option><option value="Sem setor">Sem setor</option></select><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="Filtrar por categoria"><option value="all">Todas as categorias</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select><select value={sort} onChange={(event) => setSort(event.target.value as ProductSort)} aria-label="Ordenar produtos"><option value="profit_desc">Maior lucro</option><option value="quantity_desc">Mais vendidos</option><option value="revenue_desc">Maior faturamento</option><option value="margin_desc">Maior margem</option><option value="margin_asc">Menor margem</option><option value="cmv_desc">Maior CMV</option><option value="high_sales_low_profit">Alta venda, baixo lucro</option><option value="low_sales_high_margin">Baixa venda, boa margem</option></select><span className="table-count">{rows.length} produto(s)</span></div>
+    <div className="module-toolbar product-profit-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto, SKU ou categoria" /></label><select value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value)} aria-label="Filtrar por setor"><option value="all">Todos os setores</option>{props.data.areas.filter((area) => area.is_operational).map((area) => <option key={area.id} value={area.name}>{area.name}</option>)}<option value="Sem setor">Sem setor</option></select><select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)} aria-label="Filtrar por categoria"><option value="all">Todas as categorias</option>{categories.map((category) => <option key={category} value={category}>{category}</option>)}</select><select value={sort} onChange={(event) => setSort(event.target.value as ProductSort)} aria-label="Ordenar produtos"><option value="profit_desc">Maior lucro</option><option value="quantity_desc">Mais vendidos</option><option value="revenue_desc">Maior faturamento</option><option value="margin_desc">Maior margem</option><option value="margin_asc">Menor margem</option><option value="cmv_desc">Maior CMV</option><option value="high_sales_low_profit">Alta venda, baixo lucro</option><option value="low_sales_high_margin">Baixa venda, boa margem</option></select><span className="table-count">{rows.length} produto(s)</span></div>
     <div className="data-table-card"><div className="responsive-table product-profit-table"><div className="table-row table-header"><span>Produto</span><span>Setor</span><span>Qtd.</span><span>Faturamento</span><span>Participação</span><span>Custo unit.</span><span>CMV total</span><span>Lucro bruto</span><span>Lucro/un.</span><span>Margem</span><span>Preço médio</span></div>{rows.length ? rows.map((row) => <ProductProfitabilityTableRow key={row.key} row={row} />) : <EmptyMini text="Nenhum produto encontrado com estes filtros." />}</div></div>
   </section>;
 }
@@ -1131,11 +1115,12 @@ function CatalogPage(props: Parameters<typeof SectionContent>[0]) {
   const [query, setQuery] = useState("");
   const [view, setView] = useState<"products" | "ingredients" | "areas">("products");
   const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "cost" | "recipe">("all");
-  const [sectorFilter, setSectorFilter] = useState<"all" | "unassigned" | ProductSectorKey>("all");
+  const [sectorFilter, setSectorFilter] = useState<"all" | "unassigned" | string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
-  const [bulkSector, setBulkSector] = useState<"unassigned" | ProductSectorKey>("bar");
+  const [bulkSector, setBulkSector] = useState<"unassigned" | string>("unassigned");
   const [assigningSector, setAssigningSector] = useState(false);
   const [assignmentMessage, setAssignmentMessage] = useState("");
+  const operationalAreas = props.data.areas.filter((area) => area.is_operational);
   const currentRecipes = new Map<string, Recipe>();
   props.data.recipes.filter((recipe) => recipe.effective_from <= isoInSaoPaulo()).forEach((recipe) => { if (!currentRecipes.has(String(recipe.product_id))) currentRecipes.set(String(recipe.product_id), recipe); });
   const recipeWithItems = new Set(props.data.recipeItems.map((component) => String(component.recipe_id)));
@@ -1147,25 +1132,24 @@ function CatalogPage(props: Parameters<typeof SectionContent>[0]) {
     }
     return hasCost ? "ready" : "cost";
   }
+  function productSector(item: CatalogItem) {
+    const area = nested(item.areas);
+    return area?.is_operational ? item.area_id : null;
+  }
   const source = view === "products" ? props.data.catalogItems : props.data.ingredients;
   const rows = source.filter((item) => {
     const matchesQuery = `${item.name} ${item.sku ?? ""} ${nested(item.categories)?.name ?? ""} ${nested(item.areas)?.name ?? ""}`.toLowerCase().includes(query.toLowerCase());
-    const sector = productSectorKey(nested(item.areas)?.name);
+    const sector = productSector(item);
     const matchesSector = view === "ingredients" || sectorFilter === "all" || (sectorFilter === "unassigned" ? sector === null : sector === sectorFilter);
     return matchesQuery && matchesSector && (view === "ingredients" || statusFilter === "all" || statusOf(item) === statusFilter);
   });
   const missingCost = props.data.catalogItems.filter((item) => statusOf(item) === "cost").length;
   const missingRecipe = props.data.catalogItems.filter((item) => statusOf(item) === "recipe").length;
   const linked = props.data.catalogItems.filter((item) => item.zig_product_id).length;
-  const missingSector = props.data.catalogItems.filter((item) => productSectorKey(nested(item.areas)?.name) === null).length;
-  const sectorAreas = PRODUCT_SECTORS.flatMap((sector) => {
-    const area = props.data.areas.find((candidate) => productSectorKey(candidate.name) === sector.key);
-    return area ? [{ ...sector, areaId: area.id }] : [];
-  });
-  async function assignSector(itemIds: string[], sector: "unassigned" | ProductSectorKey) {
+  const missingSector = props.data.catalogItems.filter((item) => productSector(item) === null).length;
+  async function assignSector(itemIds: string[], sector: "unassigned" | string) {
     if (!itemIds.length || assigningSector) return;
-    const areaId = sector === "unassigned" ? null : sectorAreas.find((option) => option.key === sector)?.areaId;
-    if (sector !== "unassigned" && !areaId) return setAssignmentMessage("O setor escolhido ainda não está disponível no cadastro de áreas.");
+    const areaId = sector === "unassigned" ? null : sector;
     setAssigningSector(true); setAssignmentMessage("");
     const { error } = await supabase.rpc("assign_products_to_sector", { p_business_id: Number(props.businessId), p_item_ids: itemIds.map(Number), p_area_id: areaId ? Number(areaId) : null });
     if (error) { setAssignmentMessage("Não foi possível salvar o setor. Tente novamente."); setAssigningSector(false); return; }
@@ -1180,15 +1164,15 @@ function CatalogPage(props: Parameters<typeof SectionContent>[0]) {
   }
   return <section><ModuleHero eyebrow="Base central" title="Produtos e fichas técnicas" description="Classifique os produtos reais da Zig por setor e mantenha custos e fichas técnicas no mesmo cadastro." action="Novo ingrediente" icon={<ClipboardList size={22} />} onAction={() => setEditingIngredient("new")} />
     <div className="section-kpis catalog-kpis"><MiniKpi label="Produtos" value={String(props.data.catalogItems.length)} /><MiniKpi label="Ligados à Zig" value={String(linked)} /><MiniKpi label="Sem setor" value={String(missingSector)} /><MiniKpi label="Falta custo" value={String(missingCost)} /><MiniKpi label="Falta ficha" value={String(missingRecipe)} /></div>
-    {missingSector > 0 && <div className="data-warning sector-classification-warning"><TriangleAlert size={19} /><div><strong>{missingSector} produto(s) ainda estão sem setor</strong><span>Classifique-os como Bar, Drinks, Cozinha ou Churrasqueira para tornar as análises de vendas, CMV e rentabilidade mais confiáveis.</span></div><button type="button" onClick={() => { setView("products"); setSectorFilter("unassigned"); }}>Ver pendentes</button></div>}
+    {missingSector > 0 && <div className="data-warning sector-classification-warning"><TriangleAlert size={19} /><div><strong>{missingSector} produto(s) ainda estão sem setor</strong><span>Classifique-os em um setor operacional (Cadastros → Setores) para tornar as análises de vendas, CMV e rentabilidade mais confiáveis.</span></div><button type="button" onClick={() => { setView("products"); setSectorFilter("unassigned"); }}>Ver pendentes</button></div>}
     {(missingCost + missingRecipe) > 0 && <div className="data-warning"><TriangleAlert size={19} /><div><strong>{missingCost + missingRecipe} cadastro(s) precisam de atenção</strong><span>O CMV só usa valores comprovados. Complete o custo ou a ficha técnica para aumentar a cobertura.</span></div></div>}
     <div className="catalog-tabs" role="tablist" aria-label="Tipo de cadastro"><button type="button" role="tab" aria-selected={view === "products"} className={view === "products" ? "active" : ""} onClick={() => setView("products")}><PackageSearch size={16} /> Produtos <span>{props.data.catalogItems.length}</span></button><button type="button" role="tab" aria-selected={view === "ingredients"} className={view === "ingredients" ? "active" : ""} onClick={() => { setView("ingredients"); setSelectedIds(new Set()); }}><Boxes size={16} /> Ingredientes <span>{props.data.ingredients.length}</span></button><button type="button" role="tab" aria-selected={view === "areas"} className={view === "areas" ? "active" : ""} onClick={() => { setView("areas"); setSelectedIds(new Set()); }}><CircleDollarSign size={16} /> Setores</button></div>
     {view === "areas" ? <AreasManager businessId={props.businessId} onAreasChanged={props.onRefresh} /> : <>
-    <div className="module-toolbar catalog-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={view === "products" ? "Buscar produto, SKU, categoria ou setor" : "Buscar ingrediente"} /></label>{view === "products" && <><select value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value as typeof sectorFilter)} aria-label="Filtrar por setor"><option value="all">Todos os setores</option><option value="unassigned">Sem setor ({missingSector})</option>{PRODUCT_SECTORS.map((sector) => <option key={sector.key} value={sector.key}>{sector.label}</option>)}</select><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} aria-label="Filtrar por status"><option value="all">Todos os status</option><option value="ready">Prontos</option><option value="cost">Falta custo</option><option value="recipe">Falta ficha técnica</option></select></>}<span className="table-count">{rows.length} cadastro(s)</span></div>
-    {view === "products" && selectedIds.size > 0 && <div className="bulk-sector-bar"><div><strong>{selectedIds.size} produto(s) selecionados</strong><span>Escolha um setor para aplicar a todos de uma vez.</span></div><select value={bulkSector} onChange={(event) => setBulkSector(event.target.value as typeof bulkSector)} aria-label="Setor para classificação em massa"><option value="unassigned">Sem setor</option>{sectorAreas.map((sector) => <option key={sector.key} value={sector.key}>{sector.label}</option>)}</select><button type="button" disabled={assigningSector} onClick={() => assignSector([...selectedIds], bulkSector)}>{assigningSector ? "Salvando..." : "Aplicar setor"}</button><button type="button" className="bulk-clear" onClick={() => setSelectedIds(new Set())}>Limpar seleção</button></div>}
+    <div className="module-toolbar catalog-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={view === "products" ? "Buscar produto, SKU, categoria ou setor" : "Buscar ingrediente"} /></label>{view === "products" && <><select value={sectorFilter} onChange={(event) => setSectorFilter(event.target.value as typeof sectorFilter)} aria-label="Filtrar por setor"><option value="all">Todos os setores</option><option value="unassigned">Sem setor ({missingSector})</option>{operationalAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}</select><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)} aria-label="Filtrar por status"><option value="all">Todos os status</option><option value="ready">Prontos</option><option value="cost">Falta custo</option><option value="recipe">Falta ficha técnica</option></select></>}<span className="table-count">{rows.length} cadastro(s)</span></div>
+    {view === "products" && selectedIds.size > 0 && <div className="bulk-sector-bar"><div><strong>{selectedIds.size} produto(s) selecionados</strong><span>Escolha um setor para aplicar a todos de uma vez.</span></div><select value={bulkSector} onChange={(event) => setBulkSector(event.target.value as typeof bulkSector)} aria-label="Setor para classificação em massa"><option value="unassigned">Sem setor</option>{operationalAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}</select><button type="button" disabled={assigningSector} onClick={() => assignSector([...selectedIds], bulkSector)}>{assigningSector ? "Salvando..." : "Aplicar setor"}</button><button type="button" className="bulk-clear" onClick={() => setSelectedIds(new Set())}>Limpar seleção</button></div>}
     {assignmentMessage && <p className="catalog-assignment-message" role="status">{assignmentMessage}</p>}
     <div className="data-table-card"><div className={`responsive-table catalog-table ${view === "products" ? "catalog-products-table" : "catalog-ingredients-table"}`}>
-      {view === "products" ? <><div className="table-row table-header"><label className="catalog-check"><input type="checkbox" checked={rows.length > 0 && rows.every((item) => selectedIds.has(String(item.id)))} onChange={(event) => toggleVisible(event.target.checked)} aria-label="Selecionar todos os produtos visíveis" /></label><span>Produto</span><span>Categoria</span><span>Setor</span><span>Tipo</span><span>Preço</span><span>Custo</span><span>Status</span><span></span></div>{rows.length ? rows.map((item) => { const cost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0); const status = statusOf(item); const sector = productSectorKey(nested(item.areas)?.name); return <div className="table-row" key={item.id}><label className="catalog-check"><input type="checkbox" checked={selectedIds.has(String(item.id))} onChange={(event) => toggleSelected(String(item.id), event.target.checked)} aria-label={`Selecionar ${item.name}`} /></label><strong>{item.name}<small className="sku-hint">{item.sku || (item.zig_product_id ? "Zig conectada" : "Cadastro manual")}</small></strong><span>{nested(item.categories)?.name ?? "Sem categoria"}</span><select className={`product-sector-select ${sector ? "assigned" : "unassigned"}`} value={sector ?? "unassigned"} disabled={assigningSector} onChange={(event) => assignSector([String(item.id)], event.target.value as "unassigned" | ProductSectorKey)} aria-label={`Setor de ${item.name}`}><option value="unassigned">Sem setor</option>{sectorAreas.map((option) => <option key={option.key} value={option.key}>{option.label}</option>)}</select><span>{item.costing_method === "recipe" ? "Preparado" : "Simples"}</span><span>{item.sale_price === null ? "—" : MONEY.format(Number(item.sale_price))}</span><strong>{cost > 0 ? MONEY.format(cost) : "—"}</strong><span className={`cost-badge ${status === "ready" ? "known" : "missing"}`}>{status === "ready" ? "Pronto" : status === "recipe" ? "Falta ficha" : "Falta custo"}</span><span className="row-actions"><button onClick={() => setEditing(item)} aria-label={`Editar ${item.name}`}><Pencil size={15} /></button></span></div>; }) : <EmptyMini text="Nenhum produto encontrado." />}</> : <><div className="table-row table-header"><span>Ingrediente</span><span>Categoria</span><span>Unidade</span><span>Uso</span><span>Custo vigente</span><span>Status</span><span></span></div>{rows.length ? rows.map((item) => { const cost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0); return <div className="table-row" key={item.id}><strong>{item.name}<small className="sku-hint">{item.sku || "Cadastro manual"}</small></strong><span>{nested(item.categories)?.name ?? "Sem categoria"}</span><span>{item.consumption_unit}</span><span>Por ficha</span><strong>{cost > 0 ? MONEY.format(cost) : "—"}</strong><span className={`cost-badge ${cost > 0 ? "known" : "missing"}`}>{cost > 0 ? "Pronto" : "Falta custo"}</span><span className="row-actions"><button onClick={() => setEditingIngredient(item)} aria-label={`Editar ${item.name}`}><Pencil size={15} /></button></span></div>; }) : <EmptyMini text="Nenhum ingrediente cadastrado. Use “Novo ingrediente” para começar uma ficha técnica." />}</>}
+      {view === "products" ? <><div className="table-row table-header"><label className="catalog-check"><input type="checkbox" checked={rows.length > 0 && rows.every((item) => selectedIds.has(String(item.id)))} onChange={(event) => toggleVisible(event.target.checked)} aria-label="Selecionar todos os produtos visíveis" /></label><span>Produto</span><span>Categoria</span><span>Setor</span><span>Tipo</span><span>Preço</span><span>Custo</span><span>Status</span><span></span></div>{rows.length ? rows.map((item) => { const cost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0); const status = statusOf(item); const sector = productSector(item); return <div className="table-row" key={item.id}><label className="catalog-check"><input type="checkbox" checked={selectedIds.has(String(item.id))} onChange={(event) => toggleSelected(String(item.id), event.target.checked)} aria-label={`Selecionar ${item.name}`} /></label><strong>{item.name}<small className="sku-hint">{item.sku || (item.zig_product_id ? "Zig conectada" : "Cadastro manual")}</small></strong><span>{nested(item.categories)?.name ?? "Sem categoria"}</span><select className={`product-sector-select ${sector ? "assigned" : "unassigned"}`} value={sector ?? "unassigned"} disabled={assigningSector} onChange={(event) => assignSector([String(item.id)], event.target.value as "unassigned" | string)} aria-label={`Setor de ${item.name}`}><option value="unassigned">Sem setor</option>{operationalAreas.map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}</select><span>{item.costing_method === "recipe" ? "Preparado" : "Simples"}</span><span>{item.sale_price === null ? "—" : MONEY.format(Number(item.sale_price))}</span><strong>{cost > 0 ? MONEY.format(cost) : "—"}</strong><span className={`cost-badge ${status === "ready" ? "known" : "missing"}`}>{status === "ready" ? "Pronto" : status === "recipe" ? "Falta ficha" : "Falta custo"}</span><span className="row-actions"><button onClick={() => setEditing(item)} aria-label={`Editar ${item.name}`}><Pencil size={15} /></button></span></div>; }) : <EmptyMini text="Nenhum produto encontrado." />}</> : <><div className="table-row table-header"><span>Ingrediente</span><span>Categoria</span><span>Unidade</span><span>Uso</span><span>Custo vigente</span><span>Status</span><span></span></div>{rows.length ? rows.map((item) => { const cost = Number(item.average_unit_cost ?? item.latest_unit_cost ?? 0); return <div className="table-row" key={item.id}><strong>{item.name}<small className="sku-hint">{item.sku || "Cadastro manual"}</small></strong><span>{nested(item.categories)?.name ?? "Sem categoria"}</span><span>{item.consumption_unit}</span><span>Por ficha</span><strong>{cost > 0 ? MONEY.format(cost) : "—"}</strong><span className={`cost-badge ${cost > 0 ? "known" : "missing"}`}>{cost > 0 ? "Pronto" : "Falta custo"}</span><span className="row-actions"><button onClick={() => setEditingIngredient(item)} aria-label={`Editar ${item.name}`}><Pencil size={15} /></button></span></div>; }) : <EmptyMini text="Nenhum ingrediente cadastrado. Use “Novo ingrediente” para começar uma ficha técnica." />}</>}
     </div></div>
     </>}
     {editing && <ProductEditorModal businessId={props.businessId} item={editing} data={props.data} onClose={() => setEditing(null)} onRefresh={props.onRefresh} />}
@@ -1196,7 +1180,7 @@ function CatalogPage(props: Parameters<typeof SectionContent>[0]) {
   </section>;
 }
 
-type FullArea = { id: string; name: string; slug: string; is_active: boolean; sort_order: number };
+type FullArea = { id: string; name: string; slug: string; is_active: boolean; is_operational: boolean; sort_order: number };
 
 function slugify(value: string) {
   return value
@@ -1216,10 +1200,11 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState("");
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [newOperational, setNewOperational] = useState(false);
 
   async function load() {
     setLoading(true);
-    const { data } = await supabase.from("areas").select("id,name,slug,is_active,sort_order").eq("business_id", businessId).order("sort_order").order("name");
+    const { data } = await supabase.from("areas").select("id,name,slug,is_active,is_operational,sort_order").eq("business_id", businessId).order("sort_order").order("name");
     setAreas((data ?? []) as FullArea[]);
     setLoading(false);
   }
@@ -1227,7 +1212,7 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
     let cancelled = false;
     async function initialLoad() {
       setLoading(true);
-      const { data } = await supabase.from("areas").select("id,name,slug,is_active,sort_order").eq("business_id", businessId).order("sort_order").order("name");
+      const { data } = await supabase.from("areas").select("id,name,slug,is_active,is_operational,sort_order").eq("business_id", businessId).order("sort_order").order("name");
       if (cancelled) return;
       setAreas((data ?? []) as FullArea[]);
       setLoading(false);
@@ -1249,7 +1234,7 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
       let slug = baseSlug;
       let attempt = 0;
       for (;;) {
-        const { error: insertError } = await supabase.from("areas").insert({ business_id: Number(businessId), name, slug, sort_order: nextSortOrder });
+        const { error: insertError } = await supabase.from("areas").insert({ business_id: Number(businessId), name, slug, sort_order: nextSortOrder, is_operational: newOperational });
         if (!insertError) break;
         attempt += 1;
         if (insertError.code === "23505" && attempt < 5) { slug = `${baseSlug}-${attempt}`; continue; }
@@ -1257,6 +1242,7 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
         return;
       }
       setNewName("");
+      setNewOperational(false);
       await load();
       await onAreasChanged();
     } catch (caughtError) {
@@ -1274,6 +1260,13 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
     await load(); await onAreasChanged();
   }
 
+  async function toggleOperational(area: FullArea) {
+    setError("");
+    const { error: updateError } = await supabase.from("areas").update({ is_operational: !area.is_operational }).eq("id", area.id).eq("business_id", businessId);
+    if (updateError) return setError(`Não foi possível atualizar o setor: ${updateError.message}`);
+    await load(); await onAreasChanged();
+  }
+
   function startEdit(area: FullArea) { setEditingId(area.id); setEditingName(area.name); }
 
   async function saveEdit(area: FullArea) {
@@ -1286,8 +1279,12 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
   }
 
   async function removeArea(area: FullArea) {
-    if (!confirm(`Excluir o setor "${area.name}"? Produtos, despesas e metas vinculados a ele ficarão sem setor definido — nada mais será apagado.`)) return;
+    if (area.slug === "geral") return setError(`"${area.name}" é o setor geral padrão do sistema e não pode ser excluído. Desative-o se não quiser usá-lo.`);
     setError("");
+    const { data: usageCount, error: usageError } = await supabase.rpc("area_usage_count", { p_business_id: Number(businessId), p_area_id: Number(area.id) });
+    if (usageError) return setError(`Não foi possível verificar o uso deste setor: ${usageError.message}`);
+    if (Number(usageCount) > 0) return setError(`"${area.name}" já está em uso em ${usageCount} registro(s) (produtos, despesas, pessoal ou outros). Desative-o em vez de excluir para não perder esse vínculo.`);
+    if (!confirm(`Excluir o setor "${area.name}"? Esta ação não pode ser desfeita.`)) return;
     const { error: deleteError } = await supabase.from("areas").delete().eq("id", area.id).eq("business_id", businessId);
     if (deleteError) return setError(`Não foi possível excluir o setor: ${deleteError.message}`);
     await load(); await onAreasChanged();
@@ -1296,17 +1293,19 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
   return <>
     <form className="module-toolbar catalog-toolbar area-toolbar" onSubmit={addArea}>
       <label><ClipboardList size={16} /><input value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Nome do novo setor" /></label>
+      <label className="check-label area-operational-check"><input type="checkbox" checked={newOperational} onChange={(event) => setNewOperational(event.target.checked)} /><span>Participa da análise de setores?</span></label>
       <button type="submit" className="area-add-button" disabled={saving}>{saving ? "Adicionando..." : "Adicionar setor"}</button>
       <span className="table-count">{areas.length} setor(es)</span>
     </form>
     {error && <p className="catalog-assignment-message" role="status">{error}</p>}
     <div className="data-table-card"><div className="responsive-table areas-table">
-      <div className="table-row table-header"><span>Setor</span><span>Status</span><span></span></div>
+      <div className="table-row table-header"><span>Setor</span><span>Tipo</span><span>Status</span><span></span></div>
       {loading ? <div className="empty-mini"><p>Carregando setores...</p></div> : areas.length ? areas.map((area) => (
         <div className="table-row" key={area.id}>
           {editingId === area.id
             ? <span className="area-edit-field"><input value={editingName} onChange={(event) => setEditingName(event.target.value)} autoFocus onKeyDown={(event) => { if (event.key === "Enter") saveEdit(area); if (event.key === "Escape") setEditingId(null); }} /></span>
             : <strong>{area.name}</strong>}
+          <span className={`status-badge ${area.is_operational ? "known" : "draft"}`}>{area.is_operational ? "Operacional" : "Geral"}</span>
           <span className={`status-badge ${area.is_active ? "completed" : "draft"}`}>{area.is_active ? "Ativo" : "Inativo"}</span>
           {editingId === area.id ? (
             <span className="row-actions">
@@ -1320,8 +1319,9 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
                 <button type="button" className="area-menu-backdrop" aria-label="Fechar menu" onClick={() => setOpenMenuId(null)} />
                 <div className="area-menu" role="menu">
                   <button role="menuitem" onClick={() => { startEdit(area); setOpenMenuId(null); }}><Pencil size={14} /> Renomear</button>
+                  <button role="menuitem" onClick={() => { toggleOperational(area); setOpenMenuId(null); }}>{area.is_operational ? <X size={14} /> : <CheckCircle2 size={14} />} {area.is_operational ? "Remover da análise de setores" : "Marcar como operacional"}</button>
                   <button role="menuitem" onClick={() => { toggleActive(area); setOpenMenuId(null); }}>{area.is_active ? <X size={14} /> : <CheckCircle2 size={14} />} {area.is_active ? "Desativar" : "Ativar"}</button>
-                  <button role="menuitem" className="danger" onClick={() => { removeArea(area); setOpenMenuId(null); }}><Trash2 size={14} /> Excluir</button>
+                  {area.slug !== "geral" && <button role="menuitem" className="danger" onClick={() => { removeArea(area); setOpenMenuId(null); }}><Trash2 size={14} /> Excluir</button>}
                 </div>
               </>}
             </span>
