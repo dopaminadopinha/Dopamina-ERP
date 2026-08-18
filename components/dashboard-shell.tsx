@@ -1298,14 +1298,14 @@ function AreasManager({ businessId, onAreasChanged }: { businessId: string; onAr
       <span className="table-count">{areas.length} setor(es)</span>
     </form>
     {error && <p className="catalog-assignment-message" role="status">{error}</p>}
-    <div className="data-table-card"><div className="responsive-table areas-table">
+    <div className="data-table-card areas-table-card"><div className="responsive-table areas-table">
       <div className="table-row table-header"><span>Setor</span><span>Tipo</span><span>Status</span><span></span></div>
       {loading ? <div className="empty-mini"><p>Carregando setores...</p></div> : areas.length ? areas.map((area) => (
         <div className="table-row" key={area.id}>
           {editingId === area.id
             ? <span className="area-edit-field"><input value={editingName} onChange={(event) => setEditingName(event.target.value)} autoFocus onKeyDown={(event) => { if (event.key === "Enter") saveEdit(area); if (event.key === "Escape") setEditingId(null); }} /></span>
             : <strong>{area.name}</strong>}
-          <span className={`status-badge ${area.is_operational ? "known" : "draft"}`}>{area.is_operational ? "Operacional" : "Geral"}</span>
+          <span className={`status-badge ${area.is_operational ? "completed" : "draft"}`}>{area.is_operational ? "Operacional" : "Geral"}</span>
           <span className={`status-badge ${area.is_active ? "completed" : "draft"}`}>{area.is_active ? "Ativo" : "Inativo"}</span>
           {editingId === area.id ? (
             <span className="row-actions">
