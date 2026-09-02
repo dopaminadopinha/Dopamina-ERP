@@ -249,7 +249,7 @@ function SectionContent(props: { section: Section; setSection: (section: Section
   if (props.section === "produtos") return <ProductProfitabilityPage {...props} />;
   if (props.section === "estoque") return <StockPage {...props} />;
   if (props.section === "compras") return <PurchasesPage businessId={props.businessId} userId={props.userId} range={props.range} items={[...props.data.catalogItems, ...props.data.ingredients]} />;
-  if (props.section === "pessoal") return <PersonnelPage businessId={props.businessId} userId={props.userId} range={props.range} areas={props.data.areas} onExpensesChanged={props.onRefresh} />;
+  if (props.section === "pessoal") return <PersonnelPage businessId={props.businessId} userId={props.userId} range={props.range} onExpensesChanged={props.onRefresh} />;
   if (props.section === "planejamento") return <PlanningPage {...props} />;
   if (props.section === "cadastros") return <CatalogPage {...props} />;
   if (props.section === "importacoes") return <ImportsPage {...props} />;
