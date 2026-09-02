@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { CalendarClock, CheckCircle2, Clock3, Plus, Search, TriangleAlert, UserRound, UsersRound, X } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CalendarClock, CheckCircle2, Clock3, MoreHorizontal, Pencil, Plus, Search, Trash2, TriangleAlert, UserCheck, UserRound, UsersRound, UserX, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useEscapeToClose } from "@/lib/use-escape-close";
 
@@ -108,14 +108,70 @@ function Obligations({shifts,costs,employees,onPayment}:{shifts:Shift[];costs:Pe
 }
 
 function EmployeeCard({row,businessId,onSaved}:{row:Employee;businessId:string;onSaved:()=>Promise<void>}) {
-  async function toggle(){await supabase.from('employees').update({is_active:!row.is_active}).eq('id',row.id).eq('business_id',businessId);await onSaved();}
-  return <article className={`employee-card ${!row.is_active?'inactive':''}`}><header><div className="employee-avatar"><UserRound size={18}/></div><span><h3>{row.name}</h3></span><button onClick={toggle}>{row.is_active?'Ativo':'Inativo'}</button></header><div className="employee-meta"><span>CPF<b>{formatCpf(row.cpf)}</b></span><span>Pix<b>{row.pix_key||'Não cadastrado'}</b></span></div></article>;
+  const [menuOpen,setMenuOpen]=useState(false);
+  const [editOpen,setEditOpen]=useState(false);
+  const [busy,setBusy]=useState(false);
+  const menuRef=useRef<HTMLDivElement>(null);
+
+  useEffect(()=>{
+    function closeMenu(event:PointerEvent){if(!menuRef.current?.contains(event.target as Node))setMenuOpen(false);}
+    function closeOnEscape(event:KeyboardEvent){if(event.key==='Escape')setMenuOpen(false);}
+    document.addEventListener('pointerdown',closeMenu);
+    document.addEventListener('keydown',closeOnEscape);
+    return()=>{document.removeEventListener('pointerdown',closeMenu);document.removeEventListener('keydown',closeOnEscape);};
+  },[]);
+
+  async function toggle(){
+    setBusy(true);
+    const result=await supabase.from('employees').update({is_active:!row.is_active}).eq('id',row.id).eq('business_id',businessId);
+    setBusy(false);
+    setMenuOpen(false);
+    if(result.error)return alert(`Não foi possível ${row.is_active?'desativar':'ativar'} este funcionário.`);
+    await onSaved();
+  }
+
+  async function remove(){
+    setMenuOpen(false);
+    const confirmed=window.confirm(`Excluir ${row.name}?\n\nEsta ação é permanente. Se houver jornadas ou lançamentos vinculados, a exclusão será bloqueada para proteger o histórico.`);
+    if(!confirmed)return;
+    setBusy(true);
+    const result=await supabase.from('employees').delete().eq('id',row.id).eq('business_id',businessId);
+    setBusy(false);
+    if(result.error)return alert('Este funcionário possui histórico vinculado e não pode ser excluído. Desative-o para preservar os lançamentos anteriores.');
+    await onSaved();
+  }
+
+  return <>
+    <article className={`employee-card ${!row.is_active?'inactive':''}`}>
+      <header>
+        <div className="employee-avatar"><UserRound size={18}/></div>
+        <span className="employee-name"><h3>{row.name}</h3></span>
+        <span className={`employee-state ${row.is_active?'active':'inactive'}`}>{row.is_active?'Ativo':'Inativo'}</span>
+        <div className="employee-menu" ref={menuRef}>
+          <button className="employee-menu-trigger" type="button" aria-label={`Ações de ${row.name}`} aria-haspopup="menu" aria-expanded={menuOpen} disabled={busy} onClick={()=>setMenuOpen(open=>!open)}><MoreHorizontal size={17}/></button>
+          {menuOpen&&<div className="employee-menu-popover" role="menu">
+            <button type="button" role="menuitem" onClick={()=>{setMenuOpen(false);setEditOpen(true);}}><Pencil size={14}/> Editar</button>
+            <button type="button" role="menuitem" onClick={toggle}>{row.is_active?<UserX size={14}/>:<UserCheck size={14}/>} {row.is_active?'Desativar':'Ativar'}</button>
+            <button type="button" role="menuitem" className="danger" onClick={remove}><Trash2 size={14}/> Excluir</button>
+          </div>}
+        </div>
+      </header>
+      <div className="employee-meta"><span>CPF<b>{formatCpf(row.cpf)}</b></span><span>Pix<b>{row.pix_key||'Não cadastrado'}</b></span></div>
+    </article>
+    {editOpen&&<EmployeeEditModal row={row} businessId={businessId} onClose={()=>setEditOpen(false)} onSaved={async()=>{await onSaved();setEditOpen(false);}}/>}
+  </>;
 }
 
 function EmployeeModal({businessId,userId,onClose,onSaved}:{businessId:string;userId:string;onClose:()=>void;onSaved:()=>Promise<void>}) {
  const [form,setForm]=useState({name:'',cpf:'',pix_key:''});const [busy,setBusy]=useState(false);const [message,setMessage]=useState('');
  async function save(e:React.FormEvent){e.preventDefault();if(!form.name.trim())return setMessage('Informe o nome do funcionário.');const cpfDigits=form.cpf.replace(/\D/g,'');if(cpfDigits&&cpfDigits.length!==11)return setMessage('CPF inválido: informe 11 dígitos.');setBusy(true);const result=await supabase.from('employees').insert({business_id:Number(businessId),name:form.name.trim(),cpf:cpfDigits||null,pix_key:form.pix_key.trim()||null,created_by:userId});if(result.error){setMessage('Não foi possível cadastrar.');setBusy(false);return;}await onSaved();}
  return <Modal title="Novo funcionário" subtitle="Cadastre apenas os dados reais conhecidos." onClose={onClose}><form onSubmit={save} className="personnel-form"><label><span>Nome</span><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label><span>CPF</span><input value={form.cpf} onChange={e=>setForm({...form,cpf:e.target.value})} placeholder="000.000.000-00"/></label><label><span>Pix</span><input value={form.pix_key} onChange={e=>setForm({...form,pix_key:e.target.value})} placeholder="Chave Pix"/></label>{message&&<p className="form-message">{message}</p>}<Actions busy={busy}/></form></Modal>;
+}
+
+function EmployeeEditModal({row,businessId,onClose,onSaved}:{row:Employee;businessId:string;onClose:()=>void;onSaved:()=>Promise<void>}) {
+ const [form,setForm]=useState({name:row.name,cpf:formatCpf(row.cpf)==='—'?'':formatCpf(row.cpf),pix_key:row.pix_key||''});const [busy,setBusy]=useState(false);const [message,setMessage]=useState('');
+ async function save(e:React.FormEvent){e.preventDefault();if(!form.name.trim())return setMessage('Informe o nome do funcionário.');const cpfDigits=form.cpf.replace(/\D/g,'');if(cpfDigits&&cpfDigits.length!==11)return setMessage('CPF inválido: informe 11 dígitos.');setBusy(true);const result=await supabase.from('employees').update({name:form.name.trim(),cpf:cpfDigits||null,pix_key:form.pix_key.trim()||null}).eq('id',row.id).eq('business_id',businessId);if(result.error){setMessage('Não foi possível salvar as alterações.');setBusy(false);return;}await onSaved();}
+ return <Modal title="Editar funcionário" subtitle="Atualize os dados do cadastro sem alterar o histórico financeiro." onClose={onClose}><form onSubmit={save} className="personnel-form"><label><span>Nome</span><input value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/></label><label><span>CPF</span><input value={form.cpf} onChange={e=>setForm({...form,cpf:e.target.value})} placeholder="000.000.000-00"/></label><label><span>Pix</span><input value={form.pix_key} onChange={e=>setForm({...form,pix_key:e.target.value})} placeholder="Chave Pix"/></label>{message&&<p className="form-message">{message}</p>}<Actions busy={busy} label="Salvar alterações"/></form></Modal>;
 }
 
 function ShiftModal({businessId,employees,onClose,onSaved}:{businessId:string;employees:Employee[];onClose:()=>void;onSaved:()=>Promise<void>}) {
