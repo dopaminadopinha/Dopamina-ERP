@@ -157,7 +157,8 @@ function Obligations({shifts,costs,employees,consumptionByDay,businessId,onPayme
     return <div key={`${row.type}-${row.id}`}>
       <span><b>{row.name}</b><small>{dateLabel(row.date)} · {row.description}</small></span>
       <span className="obligation-pix">{row.pix?<>Pix<b>{row.pix}</b></>:null}</span>
-      <span className="obligation-amount"><strong className={netAmount<0?'negative':''}>{row.grossAmount>0?MONEY.format(netAmount):'Somente horas'}</strong>{deduction>0&&<small>Consumo −{MONEY.format(deduction)}</small>}</span>
+      <span className="obligation-amount"><small>Total</small><b>{row.grossAmount>0?MONEY.format(row.grossAmount):'Somente horas'}</b></span>
+      <span className="obligation-amount"><small>Com desconto</small><strong className={netAmount<0?'negative':''}>{row.grossAmount>0?MONEY.format(netAmount):'Somente horas'}</strong></span>
       <Status value={row.status}/>
       {row.grossAmount>0?<button onClick={()=>onPayment(row.type,row.id,row.status!=='paid')}>{row.status==='paid'?'Reabrir':'Marcar pago'}</button>:<span/>}
       <RowDeleteMenu label={`${row.description} de ${row.name}`} onDelete={()=>onDelete(row.type,row.id,row.name)} extra={row.type==='work_shift'&&row.employeeId?[{label:'Ver consumo do dia',icon:<Receipt size={14}/>,render:(close:()=>void)=><DayConsumptionModal key="day-consumption" businessId={businessId} employeeId={row.employeeId as string} employeeName={row.name} date={row.date} onClose={close}/>}]:undefined}/>
