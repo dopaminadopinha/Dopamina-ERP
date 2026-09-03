@@ -17,12 +17,6 @@ import { PurchasesPage } from "@/components/purchases-page";
 import { PersonnelPage } from "@/components/personnel-page";
 import { StructuralCostsSection } from "@/components/structural-costs-section";
 import { parseZigReports, type ZigImportPayload } from "@/lib/zig-import";
-import {
-  parseZigAbcReport,
-  parseZigProfitabilityReport,
-  type ZigAbcPayload,
-  type ZigProfitabilityPayload,
-} from "@/lib/zig-analytics-import";
 
 type Section = "visao-geral" | "dre" | "insights" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" |
   "planejamento" | "cadastros" | "importacoes" | "configuracoes";
@@ -947,7 +941,6 @@ function SalesPage(props: Parameters<typeof SectionContent>[0]) {
 }
 
 function CmvPage(props: Parameters<typeof SectionContent>[0]) {
-  const [showImport, setShowImport] = useState(false);
   const [query, setQuery] = useState("");
   const automaticRows = automaticCmvRows(props.data.zig, props.data.catalogItems);
   const sourceRows: AutomaticCmvRow[] = automaticRows.length ? automaticRows : props.profitabilityItems.map((row) => ({ id: `report-${row.id}`, itemId: "", name: row.source_product_name, sku: row.source_sku, category: row.source_category ?? "Sem categoria", quantity: Number(row.quantity), revenue: Number(row.gross_amount), knownRevenue: row.cost_status === "known" ? Number(row.gross_amount) : 0, unitCost: row.unit_cost === null ? null : Number(row.unit_cost), totalCost: row.total_cost === null ? null : Number(row.total_cost), margin: row.cost_status === "known" ? Number(row.margin_percentage) : null, cmv: row.cost_status === "known" ? Number(row.cmv_percentage) : null, costStatus: row.cost_status }));
@@ -968,8 +961,6 @@ function CmvPage(props: Parameters<typeof SectionContent>[0]) {
     <div className="cmv-layout"><article className="chart-card"><div className="card-title-row"><div><p>Cobertura</p><h3>Faturamento com custo</h3></div><strong>{NUMBER.format(coverage * 100)}%</strong></div><CoverageBar known={knownRevenue} missing={missingRevenue} /></article><article className="chart-card"><div className="card-title-row"><div><p>Curva ABC de vendas</p><h3>Importância no faturamento</h3></div><span>{automaticRows.length ? "Período selecionado" : "Relatório importado"}</span></div><p className="abc-help">A concentra os produtos que formam cerca de 80% da receita; B vai até 95%; C reúne os demais.</p><AbcSummary rows={automaticRows.length ? salesAbc : props.data.abcItems} /></article></div>
     <div className="module-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto, SKU ou categoria" /></label><span className="table-count">{rows.length} linha(s)</span></div>
     <div className="data-table-card table-scroll"><div className="responsive-table cmv-table"><div className="table-row table-header"><span>Produto</span><span>Categoria</span><span>Receita</span><span>Custo unit.</span><span>CMV</span><span>Margem</span><span>Status</span></div>{rows.length ? rows.map((row) => <div className="table-row" key={row.id}><strong>{row.name}<small className="sku-hint">{row.sku || "Sem SKU"}</small></strong><span>{row.category}</span><strong>{MONEY.format(row.revenue)}</strong><span>{row.unitCost === null ? "—" : MONEY.format(row.unitCost)}</span><span>{row.cmv === null ? "—" : `${NUMBER.format(row.cmv * 100)}%`}</span><span>{row.margin === null ? "—" : `${NUMBER.format(row.margin * 100)}%`}</span><span className={`cost-badge ${row.costStatus === "known" ? "known" : "missing"}`}>{row.costStatus === "known" ? "Histórico aplicado" : row.costStatus === "partial" ? "Custo parcial" : "Sem custo"}</span></div>) : <EmptyMini text="Sincronize as vendas ou importe um relatório de CMV para liberar a rentabilidade." />}</div></div>
-    <button className="spreadsheet-fallback" onClick={() => setShowImport(true)}><FileSpreadsheet size={15} /> Importar CMV / ABC como complemento</button>
-    {showImport && <AnalyticsImportModal businessId={props.businessId} onClose={() => setShowImport(false)} onImported={async () => { await props.onRefresh(); setShowImport(false); }} />}
   </section>;
 }
 
@@ -2003,38 +1994,6 @@ function ImportModal({ businessId, onClose, onImported }: { businessId: string; 
   async function importData() { if (!preview) return; setBusy(true); setMessage(""); const { error } = await supabase.rpc("import_zig_sales", { p_business_id: Number(businessId), p_file_name: preview.fileName, p_file_checksum: preview.checksum, p_period_start: preview.periodStart, p_period_end: preview.periodEnd, p_summary: preview.summary, p_products: preview.products, p_payment_methods: preview.paymentMethods }); if (error) { setMessage(error.message.includes("período") ? "Esse período já foi importado. Os dados existentes foram preservados." : error.message); setBusy(false); return; } await onImported(); }
   return <div className="modal-backdrop" role="presentation"><div className="modal-card import-modal" role="dialog" aria-modal="true" aria-labelledby="import-title"><button className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Importação segura</p><h2 id="import-title">Relatórios da Zig</h2><p className="modal-description">Envie o fechamento e os produtos vendidos do mesmo período. O sistema confere os totais antes de gravar.</p>
     {!preview ? <><div className="upload-grid"><button className={closing ? "file-drop selected" : "file-drop"} onClick={() => closingRef.current?.click()}><FileSpreadsheet size={25} /><strong>{closing?.name ?? "Relatório de fechamento"}</strong><span>{closing ? "Arquivo selecionado" : "Selecionar .xlsx"}</span></button><button className={products ? "file-drop selected" : "file-drop"} onClick={() => productsRef.current?.click()}><ShoppingCart size={25} /><strong>{products?.name ?? "Produtos vendidos"}</strong><span>{products ? "Arquivo selecionado" : "Selecionar .xlsx"}</span></button></div><input ref={closingRef} hidden type="file" accept=".xlsx" onChange={(event) => setClosing(event.target.files?.[0] ?? null)} /><input ref={productsRef} hidden type="file" accept=".xlsx" onChange={(event) => setProducts(event.target.files?.[0] ?? null)} /><button className="modal-primary" onClick={analyze} disabled={busy || !closing || !products}>{busy ? "Analisando..." : "Conferir relatórios"}</button></> : <><div className="import-preview"><div><span>Período</span><strong>{dateLabel(preview.periodStart)} a {dateLabel(preview.periodEnd)}</strong></div><div><span>Produtos vendidos</span><strong>{MONEY.format(preview.summary.product_gross_amount)}</strong></div><div><span>Descontos</span><strong>{MONEY.format(preview.summary.discount_amount)}</strong></div><div><span>Receita</span><strong>{MONEY.format(preview.summary.revenue_amount)}</strong></div><div><span>Linhas</span><strong>{preview.products.length}</strong></div><div><span>Conciliação</span><strong className="success-text"><CheckCircle2 size={16} /> Aprovada</strong></div></div><div className="modal-actions"><button className="modal-secondary" onClick={() => setPreview(null)}>Trocar arquivos</button><button className="modal-primary" onClick={importData} disabled={busy}>{busy ? "Importando..." : "Importar para o painel"}</button></div></>}{message && <p className="modal-message">{message}</p>}</div></div>;
-}
-
-function AnalyticsImportModal({ businessId, onClose, onImported }: { businessId: string; onClose: () => void; onImported: () => Promise<void> }) {
-  useEscapeToClose(onClose);
-  const cmvRef = useRef<HTMLInputElement>(null); const abcRef = useRef<HTMLInputElement>(null);
-  const [cmvFile, setCmvFile] = useState<File | null>(null); const [abcFile, setAbcFile] = useState<File | null>(null);
-  const [cmvPreview, setCmvPreview] = useState<ZigProfitabilityPayload | null>(null); const [abcPreview, setAbcPreview] = useState<ZigAbcPayload | null>(null);
-  const [busy, setBusy] = useState(false); const [message, setMessage] = useState("");
-  async function analyze() {
-    if (!cmvFile && !abcFile) return setMessage("Selecione pelo menos um relatório.");
-    setBusy(true); setMessage("");
-    try {
-      const [cmv, abc] = await Promise.all([cmvFile ? parseZigProfitabilityReport(cmvFile) : null, abcFile ? parseZigAbcReport(abcFile) : null]);
-      setCmvPreview(cmv); setAbcPreview(abc);
-    } catch (error) { setMessage(error instanceof Error ? error.message : "Não foi possível analisar os relatórios."); }
-    finally { setBusy(false); }
-  }
-  async function importData() {
-    setBusy(true); setMessage("");
-    if (cmvPreview) {
-      const { error } = await supabase.rpc("import_zig_profitability", { p_business_id: Number(businessId), p_file_name: cmvPreview.fileName, p_file_checksum: cmvPreview.checksum, p_period_start: cmvPreview.periodStart, p_period_end: cmvPreview.periodEnd, p_rows: cmvPreview.rows });
-      if (error) { setMessage(error.message); setBusy(false); return; }
-    }
-    if (abcPreview) {
-      const { error } = await supabase.rpc("import_zig_abc", { p_business_id: Number(businessId), p_file_name: abcPreview.fileName, p_file_checksum: abcPreview.checksum, p_rows: abcPreview.rows });
-      if (error) { setMessage(error.message); setBusy(false); return; }
-    }
-    await onImported();
-  }
-  const hasPreview = cmvPreview || abcPreview;
-  return <div className="modal-backdrop" role="presentation"><div className="modal-card import-modal" role="dialog" aria-modal="true" aria-labelledby="analytics-import-title"><button className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Rentabilidade</p><h2 id="analytics-import-title">CMV e Curva ABC</h2><p className="modal-description">O CMV é ligado ao período de vendas já importado. A Curva ABC é opcional e fica registrada como snapshot, sem alterar o saldo de estoque.</p>
-    {!hasPreview ? <><div className="upload-grid"><button className={cmvFile ? "file-drop selected" : "file-drop"} onClick={() => cmvRef.current?.click()}><CircleDollarSign size={25} /><strong>{cmvFile?.name ?? "Relatório de CMV"}</strong><span>{cmvFile ? "Arquivo selecionado" : "Selecionar .xlsx"}</span></button><button className={abcFile ? "file-drop selected" : "file-drop"} onClick={() => abcRef.current?.click()}><BarChart3 size={25} /><strong>{abcFile?.name ?? "Curva ABC (opcional)"}</strong><span>{abcFile ? "Arquivo selecionado" : "Selecionar .xlsx"}</span></button></div><input ref={cmvRef} hidden type="file" accept=".xlsx" onChange={(event) => setCmvFile(event.target.files?.[0] ?? null)} /><input ref={abcRef} hidden type="file" accept=".xlsx" onChange={(event) => setAbcFile(event.target.files?.[0] ?? null)} /><button className="modal-primary" onClick={analyze} disabled={busy || (!cmvFile && !abcFile)}>{busy ? "Analisando..." : "Conferir relatórios"}</button></> : <><div className="import-preview">{cmvPreview && <><div><span>Período CMV</span><strong>{dateLabel(cmvPreview.periodStart)} a {dateLabel(cmvPreview.periodEnd)}</strong></div><div><span>CMV conhecido</span><strong>{MONEY.format(cmvPreview.knownCost)}</strong></div><div><span>Sem custo</span><strong className={cmvPreview.missingCostCount ? "warning-text" : "success-text"}>{cmvPreview.missingCostCount} produto(s)</strong></div></>}{abcPreview && <><div><span>Itens ABC</span><strong>{abcPreview.rows.length}</strong></div><div><span>Valor do snapshot</span><strong>{MONEY.format(abcPreview.totalValue)}</strong></div><div><span>Custos ausentes</span><strong>{abcPreview.missingCostCount}</strong></div></>}</div>{cmvPreview?.missingCostCount ? <div className="preview-warning"><TriangleAlert size={17} /><span>{MONEY.format(cmvPreview.missingCostRevenue)} do faturamento está sem custo confiável e ficará sinalizado.</span></div> : null}<div className="modal-actions"><button className="modal-secondary" onClick={() => { setCmvPreview(null); setAbcPreview(null); }}>Trocar arquivos</button><button className="modal-primary" onClick={importData} disabled={busy}>{busy ? "Importando..." : "Importar dados"}</button></div></>}{message && <p className="modal-message">{message}</p>}</div></div>;
 }
 
 function ExpenseModal({ businessId, userId, expense, onClose, onSaved }: { businessId: string; userId: string; expense: Expense | null; onClose: () => void; onSaved: () => Promise<void> }) {
