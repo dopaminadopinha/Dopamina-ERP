@@ -517,3 +517,13 @@ select option { background: var(--surface-2); color: var(--text-primary); }
 @media (max-width: 640px) {
   .ov-dashboard .finance-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+.stock-movement-toolbar { margin-top: 16px; }
+.stock-filter-summary { min-height: 46px; margin-top: 10px; padding: 9px 13px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border: 1px solid rgba(53,211,154,.13); border-radius: 6px; background: rgba(53,211,154,.025); }
+.stock-filter-summary span { color: #817b86; font-size: 10px; }
+.stock-filter-summary strong { color: #62dbae; font-size: 12px; text-align: right; }
+
+@media (max-width: 640px) {
+  .stock-filter-summary { align-items: flex-start; flex-direction: column; gap: 5px; }
+  .stock-filter-summary strong { text-align: left; }
+}

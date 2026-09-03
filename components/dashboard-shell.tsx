@@ -1303,19 +1303,25 @@ function groupedStockMovements(rows: StockMovement[]): GroupedStockMovement[] {
 }
 
 function StockMovementHistory({ rows }: { rows: StockMovement[] }) {
+  const [query, setQuery] = useState("");
+  const [movementType, setMovementType] = useState("all");
+  const [sector, setSector] = useState("all");
   const grouped = groupedStockMovements(rows);
-  const consumptionMap = new Map<string, { name: string; unit: string; quantity: number; days: Set<string>; lastDay: string }>();
-  grouped.filter((row) => Number(row.quantity) < 0).forEach((row) => {
-    const current = consumptionMap.get(String(row.item_id));
-    if (current) {
-      current.quantity += Math.abs(Number(row.quantity)); current.days.add(row.day); if (row.day > current.lastDay) current.lastDay = row.day;
-    } else consumptionMap.set(String(row.item_id), { name: row.name, unit: row.unit, quantity: Math.abs(Number(row.quantity)), days: new Set([row.day]), lastDay: row.day });
+  const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+  const sectors = [...new Set(grouped.map((row) => row.sector))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const movementTypes = [...new Set(grouped.map((row) => row.movement_type))].sort((a, b) => (STOCK_REASON_LABELS[a] ?? a).localeCompare(STOCK_REASON_LABELS[b] ?? b, "pt-BR"));
+  const filtered = grouped.filter((row) => {
+    const matchesQuery = `${row.name} ${row.origin}`.toLocaleLowerCase("pt-BR").includes(normalizedQuery);
+    return matchesQuery && (movementType === "all" || row.movement_type === movementType) && (sector === "all" || row.sector === sector);
   });
-  const consumption = [...consumptionMap.values()].sort((a, b) => b.quantity - a.quantity);
+  const exitsByUnit = new Map<string, number>();
+  filtered.filter((row) => Number(row.quantity) < 0).forEach((row) => exitsByUnit.set(row.unit, (exitsByUnit.get(row.unit) ?? 0) + Math.abs(Number(row.quantity))));
+  const exitSummary = [...exitsByUnit.entries()].map(([unit, quantity]) => `${NUMBER.format(quantity)} ${unit}`).join(" · ");
   return <section className="stock-history-section">
-    <div className="stock-section-heading"><div><p>Livro permanente</p><h3>Histórico de movimentações</h3><span>Movimentos iguais são consolidados por item, dia e tipo.</span></div><b>{grouped.length} linha(s) agrupada(s)</b></div>
-    {consumption.length > 0 && <div className="stock-consumption-summary"><div><strong>Saídas no período</strong><span>Total consolidado por item no período selecionado.</span></div><div className="stock-consumption-scroll"><div className="stock-consumption-table"><div className="stock-consumption-row header"><span>Item</span><span>Total da saída</span><span>Dias com saída</span><span>Última saída</span></div>{consumption.map((item) => <div className="stock-consumption-row" key={`${item.name}-${item.unit}`}><strong>{item.name}</strong><b>{NUMBER.format(item.quantity)} {item.unit}</b><span>{item.days.size}</span><span>{dateLabel(item.lastDay)}</span></div>)}</div></div></div>}
-    <div className="data-table-card stock-scroll-table stock-movement-scroll"><div className="responsive-table stock-movement-table"><div className="table-row table-header"><span>Data</span><span>Item</span><span>Tipo</span><span>Quantidade</span><span>Setor</span><span>Custo unit.</span><span>Origem / motivo</span></div>{grouped.length ? grouped.map((row) => <div className="table-row" key={`${row.day}-${row.item_id}-${row.movement_type}-${row.unit}-${row.sector}`}><span>{dateLabel(row.day)}</span><strong>{row.name}{row.entryCount > 1 && <small className="stock-date-hint">{row.entryCount} registros agrupados</small>}</strong><span><small className={`movement-type ${Number(row.quantity) > 0 ? "in" : "out"}`}>{STOCK_REASON_LABELS[row.movement_type] ?? row.movement_type}</small></span><strong className={Number(row.quantity) < 0 ? "negative" : ""}>{Number(row.quantity) > 0 ? "+" : ""}{NUMBER.format(Number(row.quantity))} {row.unit}</strong><span>{row.sector}</span><span>{row.unit_cost === null ? "—" : MONEY.format(Number(row.unit_cost))}</span><span>{row.origin}</span></div>) : <EmptyMini text="Nenhuma movimentação no período selecionado." />}</div></div>
+    <div className="stock-section-heading"><div><p>Livro permanente</p><h3>Histórico de movimentações</h3><span>Movimentos iguais são consolidados por item, dia e tipo.</span></div></div>
+    <div className="module-toolbar stock-toolbar stock-movement-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar item ou motivo" /></label><select value={movementType} onChange={(event) => setMovementType(event.target.value)} aria-label="Filtrar por tipo de movimentação"><option value="all">Todos os tipos</option>{movementTypes.map((value) => <option key={value} value={value}>{STOCK_REASON_LABELS[value] ?? value}</option>)}</select><select value={sector} onChange={(event) => setSector(event.target.value)} aria-label="Filtrar movimentações por setor"><option value="all">Todos os setores</option>{sectors.map((value) => <option key={value} value={value}>{value}</option>)}</select><span className="table-count">{filtered.length} linha(s)</span></div>
+    <div className="stock-filter-summary"><span>Total de saídas com os filtros aplicados</span><strong>{exitSummary || "Nenhuma saída"}</strong></div>
+    <div className="data-table-card stock-scroll-table stock-movement-scroll"><div className="responsive-table stock-movement-table"><div className="table-row table-header"><span>Data</span><span>Item</span><span>Tipo</span><span>Quantidade</span><span>Setor</span><span>Custo unit.</span><span>Origem / motivo</span></div>{filtered.length ? filtered.map((row) => <div className="table-row" key={`${row.day}-${row.item_id}-${row.movement_type}-${row.unit}-${row.sector}`}><span>{dateLabel(row.day)}</span><strong>{row.name}{row.entryCount > 1 && <small className="stock-date-hint">{row.entryCount} registros agrupados</small>}</strong><span><small className={`movement-type ${Number(row.quantity) > 0 ? "in" : "out"}`}>{STOCK_REASON_LABELS[row.movement_type] ?? row.movement_type}</small></span><strong className={Number(row.quantity) < 0 ? "negative" : ""}>{Number(row.quantity) > 0 ? "+" : ""}{NUMBER.format(Number(row.quantity))} {row.unit}</strong><span>{row.sector}</span><span>{row.unit_cost === null ? "—" : MONEY.format(Number(row.unit_cost))}</span><span>{row.origin}</span></div>) : <EmptyMini text="Nenhuma movimentação encontrada com estes filtros." />}</div></div>
   </section>;
 }
 
