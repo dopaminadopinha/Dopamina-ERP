@@ -196,6 +196,34 @@ export function normalizePaymentRows(rawRows: unknown[]): NormalizedPaymentRow[]
   return [...grouped.values()];
 }
 
+export type NormalizedBuyerRow = {
+  transaction_id: string;
+  user_document: string;
+  products_value_cents: number;
+  tip_value_cents: number;
+  is_paid: boolean | null;
+  payment_type: string;
+  purchased_at: string;
+};
+
+export function normalizeBuyerRows(rawRows: unknown[]): NormalizedBuyerRow[] {
+  return rawRows.map((raw) => {
+    const row = object(raw);
+    const transactionId = text(row.transactionId);
+    if (!transactionId) throw new Error("Comprador Zig sem transactionId.");
+    const document = text(row.userDocument).replace(/\D/g, "");
+    return {
+      transaction_id: transactionId,
+      user_document: document,
+      products_value_cents: cents(row.productsValue ?? 0, "productsValue"),
+      tip_value_cents: cents(row.tipValue ?? 0, "tipValue"),
+      is_paid: row.isPaid === null || row.isPaid === undefined ? null : boolean(row.isPaid),
+      payment_type: text(row.paymentType),
+      purchased_at: timestamp(row.date),
+    };
+  });
+}
+
 export function formatZigDate(isoDate: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(isoDate)) {
     throw new Error("Data de sincronização inválida.");

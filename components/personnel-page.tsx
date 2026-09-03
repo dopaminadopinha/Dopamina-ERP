@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarClock, CheckCircle2, Clock3, MoreHorizontal, Pencil, Plus, Search, Trash2, TriangleAlert, UserCheck, UserRound, UsersRound, UserX, X } from "lucide-react";
+import { CalendarClock, CheckCircle2, Clock3, MoreHorizontal, Pencil, Plus, Receipt, Search, Trash2, TriangleAlert, UserCheck, UserRound, UsersRound, UserX, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useEscapeToClose } from "@/lib/use-escape-close";
 
@@ -12,6 +12,9 @@ type PersonnelCost = { id: string; employee_id: string | null; employee_name: st
 type Closing = { id: string; period_start: string; period_end: string; status: PaymentStatus; total_amount: number; payment_method: string | null; items: { employee_id: string; employee_name: string; amount: number; hours_worked: number }[] };
 type Dashboard = { employees: Employee[]; shifts: Shift[]; costs: PersonnelCost[]; closings: Closing[]; revenue_cents: number };
 type PaymentStatus = "pending" | "paid" | "cancelled";
+type ZigConsumptionItem = { product_name: string; quantity: number; net_amount_cents: number };
+type ZigConsumptionTransaction = { zig_transaction_id: string; purchased_at: string; products_value_cents: number; tip_value_cents: number; is_paid: boolean | null; payment_type: string | null; items: ZigConsumptionItem[] };
+type ZigConsumption = { open_cents: number; paid_cents: number; transactions: ZigConsumptionTransaction[] };
 
 const EMPTY: Dashboard = { employees: [], shifts: [], costs: [], closings: [], revenue_cents: 0 };
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
@@ -119,7 +122,7 @@ export function PersonnelPage({ businessId, userId, range, onExpensesChanged }: 
         <article className="personnel-card"><Header kicker="Leitura gerencial" title="Situação do período"/><div className="personnel-reading"><div><UsersRound size={18}/><span><b>{data.employees.filter(row=>row.is_active).length} pessoas ativas</b><small>{data.employees.length} cadastros no total</small></span></div><div><Clock3 size={18}/><span><b>{pending > 0 ? `${MONEY.format(pending)} pendentes` : "Tudo pago"}</b><small>Custo geral do bar, sem divisão por setor</small></span></div></div></article>
         <article className="personnel-card"><Header kicker="Histórico" title="Últimos lançamentos"/><Obligations shifts={data.shifts.slice(0,5)} costs={data.costs.slice(0,5)} employees={data.employees} onPayment={togglePayment} onDelete={deletePersonnelEntry}/></article>
       </>}
-      {tab === "team" && <><div className="personnel-toolbar"><label><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar nome"/></label><span>{filteredEmployees.length} pessoa(s)</span></div><div className="employee-grid">{filteredEmployees.length ? filteredEmployees.map(row=><EmployeeCard key={row.id} row={row} businessId={businessId} onSaved={reload}/>) : <Empty text="Nenhum funcionário encontrado."/>}</div></>}
+      {tab === "team" && <><div className="personnel-toolbar"><label><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar nome"/></label><span>{filteredEmployees.length} pessoa(s)</span></div><div className="employee-grid">{filteredEmployees.length ? filteredEmployees.map(row=><EmployeeCard key={row.id} row={row} businessId={businessId} range={range} onSaved={reload}/>) : <Empty text="Nenhum funcionário encontrado."/>}</div></>}
       {tab === "work" && <><div className="personnel-actions"><button onClick={()=>setModal("shift")}><CalendarClock size={16}/> Registrar jornada</button><button onClick={()=>setModal("cost")}><Plus size={16}/> Outro custo</button><button onClick={()=>setModal("closing")}><CheckCircle2 size={16}/> Fechar período</button></div><article className="personnel-card"><Header kicker="Folha do período" title="Jornadas, diárias e custos adicionais"/><Obligations shifts={data.shifts} costs={data.costs} employees={data.employees} onPayment={togglePayment} onDelete={deletePersonnelEntry}/></article><article className="personnel-card"><Header kicker="Fechamentos" title="Histórico de folha"/><div className="closing-list">{data.closings.length ? data.closings.map(row=><div key={row.id}><span><b>{dateLabel(row.period_start)} a {dateLabel(row.period_end)}</b><small>{row.items.length} pessoa(s) · {row.items.reduce((sum,item)=>sum+Number(item.hours_worked),0)} h</small></span><strong>{MONEY.format(row.total_amount)}</strong><Status value={row.status}/>{row.status==='pending'?<button onClick={()=>payClosing(row)}>Marcar pago</button>:<span/>}<RowDeleteMenu label={`fechamento de ${dateLabel(row.period_start)} a ${dateLabel(row.period_end)}`} onDelete={()=>deleteClosing(row)}/></div>) : <Empty text="Nenhum fechamento criado ainda."/>}</div></article></>}
           </>}
     {modal === "employee" && <EmployeeModal businessId={businessId} userId={userId} onClose={()=>setModal(null)} onSaved={refreshed}/>}
@@ -148,9 +151,10 @@ function RowDeleteMenu({label,onDelete}:{label:string;onDelete:()=>Promise<void>
   return <div className="row-action-menu" ref={ref}><button className="row-action-trigger" type="button" aria-label={`Ações de ${label}`} aria-haspopup="menu" aria-expanded={open} disabled={busy} onClick={()=>setOpen(value=>!value)}><MoreHorizontal size={16}/></button>{open&&<div className="row-action-popover" role="menu"><button type="button" role="menuitem" onClick={remove}><Trash2 size={14}/> Excluir</button></div>}</div>;
 }
 
-function EmployeeCard({row,businessId,onSaved}:{row:Employee;businessId:string;onSaved:()=>Promise<void>}) {
+function EmployeeCard({row,businessId,range,onSaved}:{row:Employee;businessId:string;range:Range;onSaved:()=>Promise<void>}) {
   const [menuOpen,setMenuOpen]=useState(false);
   const [editOpen,setEditOpen]=useState(false);
+  const [consumptionOpen,setConsumptionOpen]=useState(false);
   const [busy,setBusy]=useState(false);
   const menuRef=useRef<HTMLDivElement>(null);
 
@@ -192,6 +196,7 @@ function EmployeeCard({row,businessId,onSaved}:{row:Employee;businessId:string;o
           <button className="employee-menu-trigger" type="button" aria-label={`Ações de ${row.name}`} aria-haspopup="menu" aria-expanded={menuOpen} disabled={busy} onClick={()=>setMenuOpen(open=>!open)}><MoreHorizontal size={17}/></button>
           {menuOpen&&<div className="employee-menu-popover" role="menu">
             <button type="button" role="menuitem" onClick={()=>{setMenuOpen(false);setEditOpen(true);}}><Pencil size={14}/> Editar</button>
+            {row.cpf&&<button type="button" role="menuitem" onClick={()=>{setMenuOpen(false);setConsumptionOpen(true);}}><Receipt size={14}/> Consumo no bar (Zig)</button>}
             <button type="button" role="menuitem" onClick={toggle}>{row.is_active?<UserX size={14}/>:<UserCheck size={14}/>} {row.is_active?'Desativar':'Ativar'}</button>
             <button type="button" role="menuitem" className="danger" onClick={remove}><Trash2 size={14}/> Excluir</button>
           </div>}
@@ -200,7 +205,37 @@ function EmployeeCard({row,businessId,onSaved}:{row:Employee;businessId:string;o
       <div className="employee-meta"><span>CPF<b>{formatCpf(row.cpf)}</b></span><span>Pix<b>{row.pix_key||'Não cadastrado'}</b></span></div>
     </article>
     {editOpen&&<EmployeeEditModal row={row} businessId={businessId} onClose={()=>setEditOpen(false)} onSaved={async()=>{await onSaved();setEditOpen(false);}}/>}
+    {consumptionOpen&&<ConsumptionModal businessId={businessId} employeeId={row.id} employeeName={row.name} range={range} onClose={()=>setConsumptionOpen(false)}/>}
   </>;
+}
+
+function ConsumptionModal({businessId,employeeId,employeeName,range,onClose}:{businessId:string;employeeId:string;employeeName:string;range:Range;onClose:()=>void}) {
+  const [data,setData]=useState<ZigConsumption|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState('');
+  useEffect(()=>{
+    let cancelled=false;
+    async function load(){
+      setLoading(true); setError('');
+      const result=await supabase.rpc('get_employee_zig_consumption',{p_business_id:Number(businessId),p_employee_id:Number(employeeId),p_period_start:range.start,p_period_end:range.end});
+      if(cancelled) return;
+      if(result.error) setError('Não foi possível carregar o consumo na Zig agora.');
+      else setData(result.data as ZigConsumption);
+      setLoading(false);
+    }
+    void load();
+    return ()=>{cancelled=true;};
+  },[businessId,employeeId,range.start,range.end]);
+  return <Modal title={`Consumo no bar · ${employeeName}`} subtitle="Itens comprados com o cartão Ziggy, casados pelo CPF cadastrado. Use para descontar do salário." onClose={onClose}>
+    {loading ? <div className="personnel-loading">Carregando…</div> : error ? <div className="personnel-alert"><TriangleAlert size={16}/>{error}</div> : !data || data.transactions.length===0 ? <Empty text="Nenhum consumo encontrado no período selecionado."/> : <>
+      <div className="personnel-kpis"><Kpi label="Em aberto" value={MONEY.format(data.open_cents/100)} note="Ainda não pago na Zig" tone="yellow"/><Kpi label="Já pago" value={MONEY.format(data.paid_cents/100)} note="Quitado direto na Zig" tone="green"/></div>
+      <div className="closing-list">{data.transactions.map(tx=><div key={tx.zig_transaction_id}>
+        <span><b>{DATE.format(new Date(tx.purchased_at))}</b><small>{tx.items.length ? tx.items.map(item=>`${NUMBER.format(item.quantity)}x ${item.product_name}`).join(', ') : 'Itens não detalhados'}</small></span>
+        <strong>{MONEY.format((tx.products_value_cents+tx.tip_value_cents)/100)}</strong>
+        <Status value={tx.is_paid?'paid':'pending'}/>
+      </div>)}</div>
+    </>}
+  </Modal>;
 }
 
 function EmployeeModal({businessId,userId,onClose,onSaved}:{businessId:string;userId:string;onClose:()=>void;onSaved:()=>Promise<void>}) {

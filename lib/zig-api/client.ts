@@ -90,29 +90,7 @@ export async function fetchRevenue(date: string) {
   return request("/erp/faturamento", { dtinicio: date, dtfim: date, loja: lojaId });
 }
 
-export type ProbeResult = { path: string; ok: boolean; status: number | null; bodySnippet: string; error: string | null };
-
-export async function probeEndpoint(path: string, params: Record<string, string>): Promise<ProbeResult> {
-  const token = requiredEnv("ZIG_API_TOKEN");
-  const url = new URL(`${BASE_URL}${path}`);
-  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
-  try {
-    const response = await fetch(url, {
-      method: "GET",
-      headers: { Accept: "application/json", Authorization: token },
-      cache: "no-store",
-      signal: controller.signal,
-    });
-    const text = await response.text();
-    return { path, ok: response.ok, status: response.status, bodySnippet: text.slice(0, 4000), error: null };
-  } catch (error) {
-    const message = error instanceof Error && error.name === "AbortError"
-      ? "Tempo esgotado (20s)."
-      : error instanceof Error ? error.message : "Falha desconhecida.";
-    return { path, ok: false, status: null, bodySnippet: "", error: message };
-  } finally {
-    clearTimeout(timeout);
-  }
+export async function fetchBuyers(date: string) {
+  const { lojaId } = zigConfiguration();
+  return request("/erp/compradores", { dtinicio: date, dtfim: date, loja: lojaId });
 }

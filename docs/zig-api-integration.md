@@ -18,6 +18,7 @@ O levantamento foi feito antes de qualquer alteração. O ERP possuía dados rea
 | Vendas | Formas de pagamento | Fechamento XLSX | total por meio | `/erp/faturamento` | `paymentId`, `paymentName`, `value` | `zig_payment_totals` | API disponível |
 | Vendas | Dia operacional | indisponível | evento e data/hora civil | `/erp/saida-produtos` | `transactionDate`, `eventDate`, `eventId` | `zig_sales_transactions` | ambos preservados; filtro usa dia operacional |
 | Vendas | Funcionário/origem | indisponível | atribuição da venda | `/erp/saida-produtos` | `employeeName`, `source` | `zig_sales_transactions` | disponível para evolução futura; documentos pessoais não são salvos |
+| Pessoal | Consumo de funcionário no bar (cartão Ziggy) | indisponível | comprador + itens da transação | `/erp/compradores` + `/erp/saida-produtos` | `userDocument`, `productsValue`, `isPaid` | `employee_zig_consumption` | CPF do comprador só é salvo quando casa com o CPF de um funcionário cadastrado; demais compradores são descartados |
 | Vendas | Estornos | não explícito | situação do item/transação | `/erp/saida-produtos` | `isRefunded` | transações e itens Zig | excluídos de KPIs e ranking |
 | CMV | custo e margem | cadastro central + CMV XLSX | vendas e custo médio/último custo | `/erp/saida-produtos` + cadastro | quantidade e valor líquido | itens Zig + `items` | cálculo automático com cobertura explícita; XLSX permanece como complemento |
 | CMV | Curva ABC de vendas | ABC XLSX incompleto | participação acumulada de vendas | `/erp/saida-produtos` | valores derivados | itens Zig | pode ser calculada; ABC de estoque continua no XLSX |
@@ -53,7 +54,8 @@ Zig API
 
 - `ZIG_API_TOKEN`, `SUPABASE_SERVICE_ROLE_KEY` e `CRON_SECRET` nunca usam prefixo `NEXT_PUBLIC_`.
 - O navegador envia apenas o JWT do usuário do ERP ao backend; nunca recebe o token Zig.
-- CPF, documento, telefone e e-mail de compradores/funcionários não são persistidos.
+- CPF, documento, telefone e e-mail de compradores em geral não são persistidos.
+- Exceção documentada: o CPF de um comprador é comparado (em memória, durante a sincronização) com o CPF cadastrado dos funcionários; só quando há correspondência o consumo é salvo, vinculado ao `employee_id` (não ao CPF bruto), em `employee_zig_consumption`. Serve para a gerência conferir e descontar do salário o que o funcionário consumiu com o cartão Ziggy dele. Nome, telefone e e-mail do comprador continuam nunca sendo salvos, mesmo nesse caso.
 - A sincronização é diária, sequencial e limitada a 31 dias por execução.
 - Reexecuções substituem atomicamente o mesmo dia operacional, sem duplicação.
 - O Cron diário consulta ontem e hoje, cobrindo vendas que atravessam a madrugada.
