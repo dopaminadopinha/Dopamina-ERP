@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { MoreHorizontal, Pencil, Plus, Trash2, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useEscapeToClose } from "@/lib/use-escape-close";
 
@@ -64,14 +64,35 @@ export function StructuralCostsSection({ businessId, areas, onChanged }: { busin
       {rows.map((row) => <article className={`structure-list-row ${row.is_active ? "" : "inactive"}`} key={row.id}>
         <strong className="structure-list-name">{row.name}{!row.is_active && <small>Inativo</small>}</strong>
         <span className="structure-list-type">{STRUCTURE[row.structure_type]}</span>
-        <span>{row.area_name || "Geral / não atribuído"}</span>
-        <span>Desde {dateLabel(row.effective_from)}{row.effective_to ? ` até ${dateLabel(row.effective_to)}` : " · sem fim"}</span>
+        <span className="structure-list-sector">{row.area_name || "Geral / não atribuído"}</span>
+        <span className="structure-list-period">Desde {dateLabel(row.effective_from)}{row.effective_to ? ` até ${dateLabel(row.effective_to)}` : " · sem fim"}</span>
         <strong className="structure-list-amount">{MONEY.format(row.monthly_amount)}<small>/mês</small></strong>
-        <span className="structure-card-actions"><button type="button" onClick={() => { setEditing(row); setModalOpen(true); }} aria-label={`Editar ${row.name}`} title="Editar"><Pencil size={13} /></button><button type="button" onClick={() => remove(row)} aria-label={`Excluir ${row.name}`} title="Excluir"><Trash2 size={13} /></button></span>
+        <StructureActions row={row} onEdit={() => { setEditing(row); setModalOpen(true); }} onDelete={() => remove(row)} />
       </article>)}
     </div></div> : <div className="personnel-empty">Cadastre terreno, containers, banheiros ou outro custo fixo real.</div>}
     {modalOpen && <StructureModal businessId={businessId} areas={areas} structure={editing} onClose={() => { setModalOpen(false); setEditing(null); }} onSaved={refreshed} />}
   </section>;
+}
+
+function StructureActions({ row, onEdit, onDelete }: { row: Structure; onEdit: () => void; onDelete: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function closeOutside(event: PointerEvent) { if (!ref.current?.contains(event.target as Node)) setOpen(false); }
+    function closeOnEscape(event: KeyboardEvent) { if (event.key === "Escape") setOpen(false); }
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeOnEscape); };
+  }, []);
+  async function remove() { setOpen(false); setBusy(true); await onDelete(); setBusy(false); }
+  return <div className="employee-menu structure-action-menu" ref={ref}>
+    <button className="employee-menu-trigger" type="button" aria-label={`Ações de ${row.name}`} aria-haspopup="menu" aria-expanded={open} disabled={busy} onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} /></button>
+    {open && <div className="employee-menu-popover structure-action-popover" role="menu">
+      <button type="button" role="menuitem" onClick={() => { setOpen(false); onEdit(); }}><Pencil size={14} /> Editar</button>
+      <button type="button" role="menuitem" className="danger" onClick={remove}><Trash2 size={14} /> Excluir</button>
+    </div>}
+  </div>;
 }
 
 function StructureModal({ businessId, areas, structure, onClose, onSaved }: { businessId: string; areas: Area[]; structure: Structure | null; onClose: () => void; onSaved: () => Promise<void> }) {
