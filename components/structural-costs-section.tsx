@@ -59,13 +59,17 @@ export function StructuralCostsSection({ businessId, areas, onChanged }: { busin
       <button type="button" onClick={() => { setEditing(null); setModalOpen(true); }}><Plus size={15} /> Custo estrutural</button>
     </div>
     <p className="structural-monthly-note">Compromisso mensal ativo: <strong>{MONEY.format(monthlyTotal)}</strong> · {rows.filter((row) => row.is_active).length} custo(s)</p>
-    {loading ? <div className="personnel-loading">Carregando…</div> : rows.length ? <div className="structure-grid">{rows.map((row) => <article className="structure-card" key={row.id}>
-      <header><span>{STRUCTURE[row.structure_type]}</span><span className="structure-card-actions"><button type="button" onClick={() => { setEditing(row); setModalOpen(true); }} aria-label={`Editar ${row.name}`}><Pencil size={13} /></button><button type="button" onClick={() => remove(row)} aria-label={`Excluir ${row.name}`}><Trash2 size={13} /></button></span></header>
-      <h3>{row.name}</h3>
-      <b>{MONEY.format(row.monthly_amount)}<small>/mês</small></b>
-      <p>{row.area_name || "Geral / não atribuído"}</p>
-      <footer>Desde {dateLabel(row.effective_from)}{row.effective_to ? ` até ${dateLabel(row.effective_to)}` : " · sem data final"}</footer>
-    </article>)}</div> : <div className="personnel-empty">Cadastre terreno, containers, banheiros ou outro custo fixo real.</div>}
+    {loading ? <div className="personnel-loading">Carregando…</div> : rows.length ? <div className="structure-list-wrap"><div className="structure-list">
+      <div className="structure-list-head"><span>Custo</span><span>Tipo</span><span>Setor</span><span>Vigência</span><span>Valor mensal</span><span>Ações</span></div>
+      {rows.map((row) => <article className={`structure-list-row ${row.is_active ? "" : "inactive"}`} key={row.id}>
+        <strong className="structure-list-name">{row.name}{!row.is_active && <small>Inativo</small>}</strong>
+        <span className="structure-list-type">{STRUCTURE[row.structure_type]}</span>
+        <span>{row.area_name || "Geral / não atribuído"}</span>
+        <span>Desde {dateLabel(row.effective_from)}{row.effective_to ? ` até ${dateLabel(row.effective_to)}` : " · sem fim"}</span>
+        <strong className="structure-list-amount">{MONEY.format(row.monthly_amount)}<small>/mês</small></strong>
+        <span className="structure-card-actions"><button type="button" onClick={() => { setEditing(row); setModalOpen(true); }} aria-label={`Editar ${row.name}`} title="Editar"><Pencil size={13} /></button><button type="button" onClick={() => remove(row)} aria-label={`Excluir ${row.name}`} title="Excluir"><Trash2 size={13} /></button></span>
+      </article>)}
+    </div></div> : <div className="personnel-empty">Cadastre terreno, containers, banheiros ou outro custo fixo real.</div>}
     {modalOpen && <StructureModal businessId={businessId} areas={areas} structure={editing} onClose={() => { setModalOpen(false); setEditing(null); }} onSaved={refreshed} />}
   </section>;
 }

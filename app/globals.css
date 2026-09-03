@@ -460,6 +460,15 @@ select option { background: var(--surface-2); color: var(--text-primary); }
 /* Keep purchase filters compact and consistent with the ERP typography. */
 .purchase-toolbar select { font-size: 10.5px; }
 
+/* Compact structural-cost ledger. */
+.structure-list-wrap { margin-top: 11px; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; }
+.structure-list { min-width: 850px; }.structure-list-head,.structure-list-row { padding: 0 12px; display: grid; grid-template-columns: minmax(180px,1.25fr) 90px minmax(135px,.8fr) minmax(185px,1.05fr) 125px 54px; align-items: center; gap: 12px; }
+.structure-list-head { min-height: 32px; color: #68626d; background: rgba(255,255,255,.018); font-size: 8.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .07em; }.structure-list-head span:last-child { text-align: right; }
+.structure-list-row { min-height: 49px; border-top: 1px solid var(--line); color: #918b96; font-size: 10px; }.structure-list-row:hover { background: rgba(255,255,255,.012); }.structure-list-row.inactive { opacity: .5; }
+.structure-list-name { min-width: 0; overflow: hidden; color: #d4cfd7; font-size: 11px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }.structure-list-name small { margin-left: 7px; color: #807985; font-size: 8px; font-weight: 500; text-transform: uppercase; }
+.structure-list-type { width: fit-content; padding: 3px 6px; border-radius: 4px; color: #a66ed2; background: rgba(159,86,222,.07); font-size: 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }.structure-list-amount { color: #58d9aa; font-size: 11.5px; white-space: nowrap; }.structure-list-amount small { margin-left: 3px; color: #6f6974; font-size: 8px; font-weight: 400; }
+.structure-list-row .structure-card-actions { justify-content: flex-end; }
+
 .purchase-delete-warning { margin-top: 18px; padding: 13px 14px; display: flex; align-items: flex-start; gap: 11px; border: 1px solid rgba(255,137,150,.2); border-radius: 7px; color: #ee929e; background: rgba(255,107,124,.055); }
 .purchase-delete-warning svg { flex: 0 0 auto; margin-top: 1px; }.purchase-delete-warning strong,.purchase-delete-warning span { display: block; }.purchase-delete-warning strong { font-size: 12px; }.purchase-delete-warning span { margin-top: 4px; color: #978d96; font-size: 10.5px; line-height: 1.45; }
 .purchase-delete-items { max-height: 210px; margin-top: 10px; overflow-y: auto; border: 1px solid var(--border); border-radius: 7px; }.purchase-delete-items > div { min-height: 43px; padding: 9px 12px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); }.purchase-delete-items > div:last-child { border-bottom: 0; }.purchase-delete-items span { color: #b7b0ba; font-size: 11px; }.purchase-delete-items strong { color: #ee929e; font-size: 11px; white-space: nowrap; }
