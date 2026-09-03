@@ -451,6 +451,9 @@ select option { background: var(--surface-2); color: var(--text-primary); }
 
 .ov-dashboard .finance-data-note { color: var(--text-tertiary); }
 
+/* Keep purchase filters compact and consistent with the ERP typography. */
+.purchase-toolbar select { font-size: 10.5px; }
+
 @media (max-width: 640px) {
   .ov-dashboard .finance-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
