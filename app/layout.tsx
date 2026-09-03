@@ -16,8 +16,13 @@ export const metadata: Metadata = {
   title: "Dopamina ERP",
   description: "Gestão inteligente do Bar Dopamina.",
   icons: {
-    icon: "/dopamina-logo.png",
-    shortcut: "/dopamina-logo.png",
+    icon: [
+      { url: "/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/favicon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/favicon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    shortcut: "/favicon-32.png",
+    apple: "/favicon-180.png",
   },
 };
 
