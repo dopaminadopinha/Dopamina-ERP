@@ -10,13 +10,16 @@ type Employee = { id: string; name: string; cpf: string | null; pix_key: string 
 type Shift = { id: string; employee_id: string; employee_name: string; shift_date: string; start_time: string | null; end_time: string | null; break_minutes: number; hours_worked: number; rate_snapshot: number; amount_due: number; payment_status: PaymentStatus; payment_method: string | null };
 type PersonnelCost = { id: string; employee_id: string | null; employee_name: string | null; cost_date: string; cost_type: string; description: string; amount: number; payment_status: PaymentStatus; payment_method: string | null };
 type Closing = { id: string; period_start: string; period_end: string; status: PaymentStatus; total_amount: number; payment_method: string | null; items: { employee_id: string; employee_name: string; amount: number; hours_worked: number }[] };
-type Dashboard = { employees: Employee[]; shifts: Shift[]; costs: PersonnelCost[]; closings: Closing[]; revenue_cents: number };
+type ConsumptionByDay = { employee_id: string; operational_date: string; sale_cents: number; cost_cents: number };
+type Dashboard = { employees: Employee[]; shifts: Shift[]; costs: PersonnelCost[]; closings: Closing[]; revenue_cents: number; zig_consumption_by_day: ConsumptionByDay[] };
 type PaymentStatus = "pending" | "paid" | "cancelled";
 type ZigConsumptionItem = { product_name: string; quantity: number; net_amount_cents: number };
 type ZigConsumptionTransaction = { zig_transaction_id: string; purchased_at: string; products_value_cents: number; tip_value_cents: number; is_paid: boolean | null; payment_type: string | null; items: ZigConsumptionItem[] };
 type ZigConsumption = { open_cents: number; paid_cents: number; transactions: ZigConsumptionTransaction[] };
+type DayConsumptionItem = { product_name: string; quantity: number; unit_cost_cents: number; line_cost_cents: number; line_sale_cents: number; has_cost: boolean };
+type DayConsumption = { sale_cents: number; cost_cents: number; items: DayConsumptionItem[] };
 
-const EMPTY: Dashboard = { employees: [], shifts: [], costs: [], closings: [], revenue_cents: 0 };
+const EMPTY: Dashboard = { employees: [], shifts: [], costs: [], closings: [], revenue_cents: 0, zig_consumption_by_day: [] };
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const NUMBER = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const DATE = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
@@ -120,10 +123,10 @@ export function PersonnelPage({ businessId, userId, range, onExpensesChanged }: 
       {tab === "overview" && <>
         <div className="personnel-kpis"><Kpi label="Custo de pessoal" value={MONEY.format(total)} note={`${obligations.length} lançamento(s)`}/><Kpi label="Pago" value={MONEY.format(paid)} note="Baixado no financeiro" tone="green"/><Kpi label="Pendente" value={MONEY.format(pending)} note="Aguardando pagamento" tone="yellow"/><Kpi label="Horas registradas" value={`${NUMBER.format(hours)} h`} note={`${data.shifts.length} jornada(s)`}/><Kpi label="Média diária" value={MONEY.format(total / Math.max(1, daysBetween(range)))} note="No período selecionado"/><Kpi label="Peso no faturamento" value={revenue > 0 ? `${NUMBER.format(total/revenue*100)}%` : "—"} note={revenue > 0 ? "Sobre vendas reais da Zig" : "Sem faturamento no período"}/></div>
         <article className="personnel-card"><Header kicker="Leitura gerencial" title="Situação do período"/><div className="personnel-reading"><div><UsersRound size={18}/><span><b>{data.employees.filter(row=>row.is_active).length} pessoas ativas</b><small>{data.employees.length} cadastros no total</small></span></div><div><Clock3 size={18}/><span><b>{pending > 0 ? `${MONEY.format(pending)} pendentes` : "Tudo pago"}</b><small>Custo geral do bar, sem divisão por setor</small></span></div></div></article>
-        <article className="personnel-card"><Header kicker="Histórico" title="Últimos lançamentos"/><Obligations shifts={data.shifts.slice(0,5)} costs={data.costs.slice(0,5)} employees={data.employees} onPayment={togglePayment} onDelete={deletePersonnelEntry}/></article>
+        <article className="personnel-card"><Header kicker="Histórico" title="Últimos lançamentos"/><Obligations shifts={data.shifts.slice(0,5)} costs={data.costs.slice(0,5)} employees={data.employees} consumptionByDay={data.zig_consumption_by_day} businessId={businessId} onPayment={togglePayment} onDelete={deletePersonnelEntry}/></article>
       </>}
       {tab === "team" && <><div className="personnel-toolbar"><label><Search size={15}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Buscar nome"/></label><span>{filteredEmployees.length} pessoa(s)</span></div><div className="employee-grid">{filteredEmployees.length ? filteredEmployees.map(row=><EmployeeCard key={row.id} row={row} businessId={businessId} range={range} onSaved={reload}/>) : <Empty text="Nenhum funcionário encontrado."/>}</div></>}
-      {tab === "work" && <><div className="personnel-actions"><button onClick={()=>setModal("shift")}><CalendarClock size={16}/> Registrar jornada</button><button onClick={()=>setModal("cost")}><Plus size={16}/> Outro custo</button><button onClick={()=>setModal("closing")}><CheckCircle2 size={16}/> Fechar período</button></div><article className="personnel-card"><Header kicker="Folha do período" title="Jornadas, diárias e custos adicionais"/><Obligations shifts={data.shifts} costs={data.costs} employees={data.employees} onPayment={togglePayment} onDelete={deletePersonnelEntry}/></article><article className="personnel-card"><Header kicker="Fechamentos" title="Histórico de folha"/><div className="closing-list">{data.closings.length ? data.closings.map(row=><div key={row.id}><span><b>{dateLabel(row.period_start)} a {dateLabel(row.period_end)}</b><small>{row.items.length} pessoa(s) · {row.items.reduce((sum,item)=>sum+Number(item.hours_worked),0)} h</small></span><strong>{MONEY.format(row.total_amount)}</strong><Status value={row.status}/>{row.status==='pending'?<button onClick={()=>payClosing(row)}>Marcar pago</button>:<span/>}<RowDeleteMenu label={`fechamento de ${dateLabel(row.period_start)} a ${dateLabel(row.period_end)}`} onDelete={()=>deleteClosing(row)}/></div>) : <Empty text="Nenhum fechamento criado ainda."/>}</div></article></>}
+      {tab === "work" && <><div className="personnel-actions"><button onClick={()=>setModal("shift")}><CalendarClock size={16}/> Registrar jornada</button><button onClick={()=>setModal("cost")}><Plus size={16}/> Outro custo</button><button onClick={()=>setModal("closing")}><CheckCircle2 size={16}/> Fechar período</button></div><article className="personnel-card"><Header kicker="Folha do período" title="Jornadas, diárias e custos adicionais"/><Obligations shifts={data.shifts} costs={data.costs} employees={data.employees} consumptionByDay={data.zig_consumption_by_day} businessId={businessId} onPayment={togglePayment} onDelete={deletePersonnelEntry}/></article><article className="personnel-card"><Header kicker="Fechamentos" title="Histórico de folha"/><div className="closing-list">{data.closings.length ? data.closings.map(row=><div key={row.id}><span><b>{dateLabel(row.period_start)} a {dateLabel(row.period_end)}</b><small>{row.items.length} pessoa(s) · {row.items.reduce((sum,item)=>sum+Number(item.hours_worked),0)} h</small></span><strong>{MONEY.format(row.total_amount)}</strong><Status value={row.status}/>{row.status==='pending'?<button onClick={()=>payClosing(row)}>Marcar pago</button>:<span/>}<RowDeleteMenu label={`fechamento de ${dateLabel(row.period_start)} a ${dateLabel(row.period_end)}`} onDelete={()=>deleteClosing(row)}/></div>) : <Empty text="Nenhum fechamento criado ainda."/>}</div></article></>}
           </>}
     {modal === "employee" && <EmployeeModal businessId={businessId} userId={userId} onClose={()=>setModal(null)} onSaved={refreshed}/>}
     {modal === "shift" && <ShiftModal businessId={businessId} employees={data.employees.filter(e=>e.is_active)} onClose={()=>setModal(null)} onSaved={refreshed}/>}
@@ -138,17 +141,65 @@ function Kpi({label,value,note,tone=""}:{label:string;value:string;note:string;t
 function Empty({text}:{text:string}) { return <div className="personnel-empty">{text}</div>; }
 function Status({value}:{value:PaymentStatus}) { return <span className={`personnel-status ${value}`}>{value==='paid'?'Pago':value==='pending'?'Pendente':'Cancelado'}</span>; }
 
-function Obligations({shifts,costs,employees,onPayment,onDelete}:{shifts:Shift[];costs:PersonnelCost[];employees:Employee[];onPayment:(type:"work_shift"|"personnel_cost",id:string,paid:boolean)=>Promise<void>;onDelete:(type:"work_shift"|"personnel_cost",id:string,name:string)=>Promise<void>}) {
+function Obligations({shifts,costs,employees,consumptionByDay,businessId,onPayment,onDelete}:{shifts:Shift[];costs:PersonnelCost[];employees:Employee[];consumptionByDay:ConsumptionByDay[];businessId:string;onPayment:(type:"work_shift"|"personnel_cost",id:string,paid:boolean)=>Promise<void>;onDelete:(type:"work_shift"|"personnel_cost",id:string,name:string)=>Promise<void>}) {
   const pixByEmployee=new Map(employees.map(row=>[String(row.id),row.pix_key]));
-  const rows=[...shifts.map(row=>({id:row.id,type:'work_shift' as const,date:row.shift_date,name:row.employee_name,pix:pixByEmployee.get(String(row.employee_id))||null,description:`${NUMBER.format(row.hours_worked)} h`,amount:Number(row.amount_due),status:row.payment_status})),...costs.map(row=>({id:row.id,type:'personnel_cost' as const,date:row.cost_date,name:row.employee_name||'Custo geral',pix:row.employee_id?pixByEmployee.get(String(row.employee_id))||null:null,description:`${COST_TYPES[row.cost_type]||row.cost_type} · ${row.description}`,amount:Number(row.amount),status:row.payment_status}))].sort((a,b)=>b.date.localeCompare(a.date));
-  return <div className="obligation-list">{rows.length?rows.map(row=><div key={`${row.type}-${row.id}`}><span><b>{row.name}</b><small>{dateLabel(row.date)} · {row.description}</small></span><span className="obligation-pix">{row.pix?<>Pix<b>{row.pix}</b></>:null}</span><strong>{row.amount>0?MONEY.format(row.amount):'Somente horas'}</strong><Status value={row.status}/>{row.amount>0?<button onClick={()=>onPayment(row.type,row.id,row.status!=='paid')}>{row.status==='paid'?'Reabrir':'Marcar pago'}</button>:<span/>}<RowDeleteMenu label={`${row.description} de ${row.name}`} onDelete={()=>onDelete(row.type,row.id,row.name)}/></div>):<Empty text="Nenhum lançamento no período selecionado."/>}</div>;
+  const costByEmployeeDay=new Map(consumptionByDay.map(row=>[`${row.employee_id}|${row.operational_date}`,row.cost_cents]));
+  const rows=[
+    ...shifts.map(row=>{
+      const deductionCents=row.employee_id?costByEmployeeDay.get(`${row.employee_id}|${row.shift_date}`)||0:0;
+      return {id:row.id,type:'work_shift' as const,date:row.shift_date,employeeId:row.employee_id,name:row.employee_name,pix:pixByEmployee.get(String(row.employee_id))||null,description:`${NUMBER.format(row.hours_worked)} h`,grossAmount:Number(row.amount_due),deductionCents,status:row.payment_status};
+    }),
+    ...costs.map(row=>({id:row.id,type:'personnel_cost' as const,date:row.cost_date,employeeId:row.employee_id,name:row.employee_name||'Custo geral',pix:row.employee_id?pixByEmployee.get(String(row.employee_id))||null:null,description:`${COST_TYPES[row.cost_type]||row.cost_type} · ${row.description}`,grossAmount:Number(row.amount),deductionCents:0,status:row.payment_status})),
+  ].sort((a,b)=>b.date.localeCompare(a.date));
+  return <div className="obligation-list">{rows.length?rows.map(row=>{
+    const deduction=row.deductionCents/100;
+    const netAmount=row.grossAmount-deduction;
+    return <div key={`${row.type}-${row.id}`}>
+      <span><b>{row.name}</b><small>{dateLabel(row.date)} · {row.description}</small></span>
+      <span className="obligation-pix">{row.pix?<>Pix<b>{row.pix}</b></>:null}</span>
+      <span className="obligation-amount"><strong className={netAmount<0?'negative':''}>{row.grossAmount>0?MONEY.format(netAmount):'Somente horas'}</strong>{deduction>0&&<small>Consumo −{MONEY.format(deduction)}</small>}</span>
+      <Status value={row.status}/>
+      {row.grossAmount>0?<button onClick={()=>onPayment(row.type,row.id,row.status!=='paid')}>{row.status==='paid'?'Reabrir':'Marcar pago'}</button>:<span/>}
+      <RowDeleteMenu label={`${row.description} de ${row.name}`} onDelete={()=>onDelete(row.type,row.id,row.name)} extra={row.type==='work_shift'&&row.employeeId?[{label:'Ver consumo do dia',icon:<Receipt size={14}/>,render:(close:()=>void)=><DayConsumptionModal key="day-consumption" businessId={businessId} employeeId={row.employeeId as string} employeeName={row.name} date={row.date} onClose={close}/>}]:undefined}/>
+    </div>;
+  }):<Empty text="Nenhum lançamento no período selecionado."/>}</div>;
 }
 
-function RowDeleteMenu({label,onDelete}:{label:string;onDelete:()=>Promise<void>}) {
-  const [open,setOpen]=useState(false);const [busy,setBusy]=useState(false);const ref=useRef<HTMLDivElement>(null);
+function RowDeleteMenu({label,onDelete,extra}:{label:string;onDelete:()=>Promise<void>;extra?:{label:string;icon:React.ReactNode;render:(close:()=>void)=>React.ReactNode}[]}) {
+  const [open,setOpen]=useState(false);const [busy,setBusy]=useState(false);const [activeExtra,setActiveExtra]=useState<number|null>(null);const ref=useRef<HTMLDivElement>(null);
   useEffect(()=>{function outside(event:PointerEvent){if(!ref.current?.contains(event.target as Node))setOpen(false);}function escape(event:KeyboardEvent){if(event.key==='Escape')setOpen(false);}document.addEventListener('pointerdown',outside);document.addEventListener('keydown',escape);return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',escape);};},[]);
   async function remove(){setOpen(false);setBusy(true);await onDelete();setBusy(false);}
-  return <div className="row-action-menu" ref={ref}><button className="row-action-trigger" type="button" aria-label={`Ações de ${label}`} aria-haspopup="menu" aria-expanded={open} disabled={busy} onClick={()=>setOpen(value=>!value)}><MoreHorizontal size={16}/></button>{open&&<div className="row-action-popover" role="menu"><button type="button" role="menuitem" onClick={remove}><Trash2 size={14}/> Excluir</button></div>}</div>;
+  return <div className="row-action-menu" ref={ref}><button className="row-action-trigger" type="button" aria-label={`Ações de ${label}`} aria-haspopup="menu" aria-expanded={open} disabled={busy} onClick={()=>setOpen(value=>!value)}><MoreHorizontal size={16}/></button>{open&&<div className="row-action-popover" role="menu">{extra?.map((item,index)=><button key={item.label} type="button" role="menuitem" onClick={()=>{setOpen(false);setActiveExtra(index);}}>{item.icon} {item.label}</button>)}<button type="button" role="menuitem" onClick={remove}><Trash2 size={14}/> Excluir</button></div>}{activeExtra!==null&&extra?.[activeExtra]?.render(()=>setActiveExtra(null))}</div>;
+}
+
+function DayConsumptionModal({businessId,employeeId,employeeName,date,onClose}:{businessId:string;employeeId:string;employeeName:string;date:string;onClose:()=>void}) {
+  const [data,setData]=useState<DayConsumption|null>(null);
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState('');
+  useEffect(()=>{
+    let cancelled=false;
+    async function load(){
+      setLoading(true); setError('');
+      const result=await supabase.rpc('get_employee_day_consumption',{p_business_id:Number(businessId),p_employee_id:Number(employeeId),p_date:date});
+      if(cancelled) return;
+      if(result.error) setError('Não foi possível carregar o consumo do dia agora.');
+      else setData(result.data as DayConsumption);
+      setLoading(false);
+    }
+    void load();
+    return ()=>{cancelled=true;};
+  },[businessId,employeeId,date]);
+  const missingCost=data?.items.some(item=>!item.has_cost)??false;
+  return <Modal title={`Consumo do dia · ${employeeName}`} subtitle={`${dateLabel(date)} · valores pelo preço de custo, usados para o desconto da jornada.`} onClose={onClose}>
+    {loading ? <div className="personnel-loading">Carregando…</div> : error ? <div className="personnel-alert"><TriangleAlert size={16}/>{error}</div> : !data || data.items.length===0 ? <Empty text="Nenhum consumo encontrado nesta data."/> : <>
+      <div className="personnel-kpis"><Kpi label="Desconto (custo)" value={MONEY.format(data.cost_cents/100)} note="Valor descontado da jornada" tone="yellow"/><Kpi label="Valor de venda" value={MONEY.format(data.sale_cents/100)} note="Preço normal, não cobrado do funcionário" tone="green"/></div>
+      {missingCost&&<div className="personnel-alert"><TriangleAlert size={16}/>Algum item não tem custo cadastrado e entrou como R$ 0,00 no desconto. Cadastre o custo do produto para refletir corretamente.</div>}
+      <div className="closing-list">{data.items.map((item,index)=><div key={index}>
+        <span><b>{item.product_name}</b><small>{NUMBER.format(item.quantity)}x · custo unitário {MONEY.format(item.unit_cost_cents/100)}{!item.has_cost?' (sem custo cadastrado)':''}</small></span>
+        <strong>{MONEY.format(item.line_cost_cents/100)}</strong>
+      </div>)}</div>
+    </>}
+  </Modal>;
 }
 
 function EmployeeCard({row,businessId,range,onSaved}:{row:Employee;businessId:string;range:Range;onSaved:()=>Promise<void>}) {
