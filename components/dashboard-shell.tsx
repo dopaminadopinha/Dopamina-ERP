@@ -1554,10 +1554,47 @@ function ExpensesPage(props: Parameters<typeof SectionContent>[0]) {
   const recurring = confirmed.filter((expense) => expense.is_recurring).reduce((sum, expense) => sum + Number(expense.amount), 0);
   const largest = [...confirmed].sort((a, b) => Number(b.amount) - Number(a.amount)).slice(0, 6);
   const availableCategories = [...new Set(props.expenses.map((expense) => expense.category))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const [structuralEdit, setStructuralEdit] = useState<Expense | null>(null);
   async function remove(expense: Expense) {
     if (!confirm(`Excluir a despesa “${expense.description}”?`)) return;
     const { error } = await supabase.from("expenses").delete().eq("id", expense.id).eq("business_id", props.businessId);
     if (error) return alert("Não foi possível excluir a despesa.");
+    await props.onRefresh();
+  }
+  async function removeStructural(expense: Expense) {
+    if (!confirm(`Excluir “${expense.description}”? A despesa recorrente vinculada também será removida.`)) return;
+    const { error } = await supabase.rpc("delete_structural_cost", { p_business_id: Number(props.businessId), p_id: Number(expense.source_id) });
+    if (error) return alert("Não foi possível excluir este custo estrutural.");
+    await props.onRefresh();
+  }
+  async function removePersonnelLinked(expense: Expense) {
+    const sourceType = expense.source_type as "work_shift" | "personnel_cost";
+    const label = sourceType === "work_shift" ? "jornada" : "custo de pessoal";
+    if (!confirm(`Excluir ${label} “${expense.description}”? O lançamento correspondente também será removido.`)) return;
+    const table = sourceType === "work_shift" ? "work_shifts" : "personnel_cost_entries";
+    const linked = await supabase.from(table).select("payroll_closing_id").eq("id", expense.source_id as string).eq("business_id", props.businessId).maybeSingle();
+    if (linked.error) return alert("Não foi possível verificar este lançamento.");
+    if (linked.data?.payroll_closing_id) return alert("Este lançamento faz parte de um fechamento de folha. Exclua primeiro o fechamento na aba Pessoal.");
+    const removed = await supabase.from(table).delete().eq("id", expense.source_id as string).eq("business_id", props.businessId);
+    if (removed.error) return alert("Não foi possível excluir este lançamento.");
+    const expenseRemoved = await supabase.from("expenses").delete().eq("business_id", props.businessId).eq("source_type", sourceType).eq("source_id", expense.source_id as string);
+    if (expenseRemoved.error) alert("O lançamento foi excluído, mas a despesa correspondente pode não ter sido removida corretamente.");
+    await props.onRefresh();
+  }
+  async function togglePayment(expense: Expense) {
+    const willBePaid = expense.status !== "completed";
+    const method = willBePaid ? window.prompt("Forma de pagamento (ex.: PIX, dinheiro):", expense.payment_method || "PIX") ?? "" : "";
+    if (willBePaid && !method.trim()) return;
+    if (expense.purchase_id) {
+      const { error } = await supabase.rpc("update_purchase_payment", { p_business_id: Number(props.businessId), p_purchase_id: Number(expense.purchase_id), p_payment_status: willBePaid ? "paid" : "pending", p_payment_method: method || expense.payment_method });
+      if (error) return alert("Não foi possível atualizar o pagamento.");
+    } else if (expense.source_type === "work_shift" || expense.source_type === "personnel_cost") {
+      const { error } = await supabase.rpc("set_personnel_payment", { p_business_id: Number(props.businessId), p_source_type: expense.source_type, p_source_id: Number(expense.source_id), p_paid: willBePaid, p_payment_method: method });
+      if (error) return alert("Não foi possível atualizar o pagamento.");
+    } else {
+      const { error } = await supabase.from("expenses").update({ status: willBePaid ? "completed" : "pending", paid_at: willBePaid ? new Date().toISOString() : null, payment_method: method || expense.payment_method }).eq("id", expense.id).eq("business_id", props.businessId);
+      if (error) return alert("Não foi possível atualizar o pagamento.");
+    }
     await props.onRefresh();
   }
   return <section><ModuleHero eyebrow="Financeiro" title="Despesas" description="Entenda onde o dinheiro é gasto e quanto custa manter o Dopamina funcionando." action="Nova despesa" icon={<ReceiptText size={19} />} onAction={() => setEditing("new")} />
@@ -1581,9 +1618,76 @@ function ExpensesPage(props: Parameters<typeof SectionContent>[0]) {
     </div>
     <p className="expense-method-note"><TriangleAlert size={14} />O custo operacional considera despesas pagas e pendentes. Recorrências com vigência são projetadas e rateadas pelos dias de cada mês, sem criar lançamentos duplicados.</p>
     <div className="module-toolbar expense-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar despesa, categoria ou pagamento" /></label><select aria-label="Filtrar por categoria" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">Todas as categorias</option>{availableCategories.map((category) => <option key={category}>{category}</option>)}</select><select aria-label="Filtrar por comportamento" value={behaviorFilter} onChange={(event) => setBehaviorFilter(event.target.value)}><option value="all">Fixas e variáveis</option><option value="fixed">Fixas</option><option value="variable">Variáveis</option></select><select aria-label="Filtrar por recorrência" value={recurrenceFilter} onChange={(event) => setRecurrenceFilter(event.target.value)}><option value="all">Todas as recorrências</option><option value="recurring">Recorrentes</option><option value="single">Não recorrentes</option></select><select aria-label="Filtrar por status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos os status</option><option value="completed">Pago</option><option value="pending">Pendente</option><option value="draft">Rascunho</option></select><span className="table-count">{props.refreshing ? "Atualizando..." : `${rows.length} lançamento(s)`}</span></div>
-    <div className="data-table-card"><div className="responsive-table expenses-table"><div className="table-row table-header"><span>Data</span><span>Descrição</span><span>Categoria</span><span>Tipo</span><span>Recorrência</span><span>Status</span><span>Valor</span><span></span></div>{rows.length ? rows.map((expense) => <div className="table-row" key={expense.id}><span>{dateLabel(expense.expense_date)}</span><strong>{expense.description}<small className="expense-payment-hint">{expense.purchase_id ? "Gerado e controlado pela compra" : expense.source_type ? "Gerado e controlado pelo módulo de origem" : expense.payment_method || "Pagamento não informado"}</small></strong><span>{expense.category}</span><span className={`expense-type-badge ${expense.cost_behavior}`}>{expense.cost_behavior === "fixed" ? "Fixa" : "Variável"}</span><span>{expense.is_recurring ? <small className="recurring-badge">Recorrente</small> : "Não recorrente"}</span><StatusBadge status={expense.status} /><strong>{MONEY.format(expense.amount)}</strong><span className="row-actions">{!expense.purchase_id && !expense.source_type && <><button onClick={() => setEditing(expense)} aria-label={`Editar ${expense.description}`}><Pencil size={15} /></button><button onClick={() => remove(expense)} aria-label={`Excluir ${expense.description}`}><Trash2 size={15} /></button></>}</span></div>) : <EmptyMini text="Nenhuma despesa encontrada com os filtros atuais." />}</div></div>
+    <div className="data-table-card"><div className="responsive-table expenses-table"><div className="table-row table-header"><span>Data</span><span>Descrição</span><span>Categoria</span><span>Tipo</span><span>Recorrência</span><span>Status</span><span>Valor</span><span></span></div>{rows.length ? rows.map((expense) => {
+      const canEdit = !expense.purchase_id && (!expense.source_type || expense.source_type === "structural_cost");
+      const canDelete = !expense.purchase_id;
+      const canTogglePayment = expense.status !== "cancelled";
+      function edit() { if (expense.source_type === "structural_cost") setStructuralEdit(expense); else setEditing(expense); }
+      function del() { if (expense.source_type === "structural_cost") return removeStructural(expense); if (expense.source_type === "work_shift" || expense.source_type === "personnel_cost") return removePersonnelLinked(expense); return remove(expense); }
+      return <div className="table-row" key={expense.id}><span>{dateLabel(expense.expense_date)}</span><strong>{expense.description}<small className="expense-payment-hint">{expense.purchase_id ? "Gerado e controlado pela compra" : expense.source_type ? "Gerado e controlado pelo módulo de origem" : expense.payment_method || "Pagamento não informado"}</small></strong><span>{expense.category}</span><span className={`expense-type-badge ${expense.cost_behavior}`}>{expense.cost_behavior === "fixed" ? "Fixa" : "Variável"}</span><span>{expense.is_recurring ? <small className="recurring-badge">Recorrente</small> : "Não recorrente"}</span><StatusBadge status={expense.status} /><strong>{MONEY.format(expense.amount)}</strong><span className="row-actions">{canTogglePayment && <button className="expense-pay-toggle" onClick={() => togglePayment(expense)}>{expense.status === "completed" ? "Reabrir" : "Marcar pago"}</button>}<ExpenseRowMenu label={expense.description} onEdit={canEdit ? edit : undefined} onDelete={canDelete ? del : undefined} /></span></div>;
+    }) : <EmptyMini text="Nenhuma despesa encontrada com os filtros atuais." />}</div></div>
     {editing && <ExpenseModal businessId={props.businessId} userId={props.userId} expense={editing === "new" ? null : editing} onClose={() => setEditing(null)} onSaved={async () => { await props.onRefresh(); setEditing(null); }} />}
+    {structuralEdit && <StructuralExpenseEditModal businessId={props.businessId} areas={props.data.areas} expense={structuralEdit} onClose={() => setStructuralEdit(null)} onSaved={async () => { await props.onRefresh(); setStructuralEdit(null); }} />}
   </section>;
+}
+function ExpenseRowMenu({ label, onEdit, onDelete }: { label: string; onEdit?: () => void; onDelete?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function outside(event: PointerEvent) { if (!ref.current?.contains(event.target as Node)) setOpen(false); }
+    function escape(event: KeyboardEvent) { if (event.key === "Escape") setOpen(false); }
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
+  }, []);
+  if (!onEdit && !onDelete) return null;
+  return <div className="row-action-menu" ref={ref}>
+    <button className="row-action-trigger" type="button" aria-label={`Ações de ${label}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} /></button>
+    {open && <div className="row-action-popover" role="menu">
+      {onEdit && <button type="button" role="menuitem" onClick={() => { setOpen(false); onEdit(); }}><Pencil size={14} /> Editar</button>}
+      {onDelete && <button type="button" role="menuitem" className="danger" onClick={() => { setOpen(false); onDelete(); }}><Trash2 size={14} /> Excluir</button>}
+    </div>}
+  </div>;
+}
+function StructuralExpenseEditModal({ businessId, areas, expense, onClose, onSaved }: { businessId: string; areas: Area[]; expense: Expense; onClose: () => void; onSaved: () => Promise<void> }) {
+  useEscapeToClose(onClose);
+  const [loading, setLoading] = useState(true);
+  const [form, setForm] = useState({ area_id: "", name: "", structure_type: "container", monthly_amount: "", effective_from: "", effective_to: "", notes: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const { data, error: fetchError } = await supabase.from("structural_costs").select("area_id,name,structure_type,monthly_amount,effective_from,effective_to,notes").eq("id", expense.source_id as string).eq("business_id", businessId).single();
+      if (cancelled) return;
+      if (fetchError || !data) { setError("Não foi possível carregar este custo estrutural."); setLoading(false); return; }
+      setForm({ area_id: data.area_id ? String(data.area_id) : "", name: data.name, structure_type: data.structure_type, monthly_amount: String(data.monthly_amount), effective_from: data.effective_from, effective_to: data.effective_to ?? "", notes: data.notes ?? "" });
+      setLoading(false);
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [businessId, expense.source_id]);
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    if (!form.name.trim() || Number(form.monthly_amount.replace(",", ".")) <= 0) return setError("Informe nome e valor mensal.");
+    setSaving(true);
+    const { error: rpcError } = await supabase.rpc("update_structural_cost", { p_business_id: Number(businessId), p_id: Number(expense.source_id), p_area_id: form.area_id ? Number(form.area_id) : null, p_name: form.name, p_structure_type: form.structure_type, p_monthly_amount: Number(form.monthly_amount.replace(",", ".")), p_effective_from: form.effective_from, p_effective_to: form.effective_to || null, p_notes: form.notes });
+    if (rpcError) { setError(rpcError.message); setSaving(false); return; }
+    await onSaved();
+  }
+  return <div className="modal-backdrop"><div className="modal-card" role="dialog" aria-modal="true" aria-label="Editar custo estrutural"><button className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Despesas</p><h2>Editar custo estrutural</h2>
+    {loading ? <p className="modal-description">Carregando…</p> : <form onSubmit={save} className="personnel-form">
+      <label><span>Nome</span><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+      <label><span>Estrutura</span><select value={form.structure_type} onChange={(e) => setForm({ ...form, structure_type: e.target.value })}><option value="terrain">Terreno</option><option value="container">Container</option><option value="bathroom">Banheiro</option><option value="other">Outro</option></select></label>
+      <label><span>Setor responsável</span><select value={form.area_id} onChange={(e) => setForm({ ...form, area_id: e.target.value })}><option value="">Geral / não atribuído</option>{areas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+      <label><span>Valor mensal</span><input value={form.monthly_amount} onChange={(e) => setForm({ ...form, monthly_amount: e.target.value })} inputMode="decimal" /></label>
+      <label><span>Vigência inicial</span><input type="date" value={form.effective_from} onChange={(e) => setForm({ ...form, effective_from: e.target.value })} /></label>
+      <label><span>Vigência final (opcional)</span><input type="date" value={form.effective_to} onChange={(e) => setForm({ ...form, effective_to: e.target.value })} /></label>
+      <label className="wide"><span>Observações</span><input value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} /></label>
+      {error && <p className="form-message">{error}</p>}
+      <div className="personnel-form-actions"><button type="submit" disabled={saving}>{saving ? "Salvando…" : "Salvar"}</button></div>
+    </form>}
+  </div></div>;
 }
 
 function ImportsPage(props: Parameters<typeof SectionContent>[0]) {
