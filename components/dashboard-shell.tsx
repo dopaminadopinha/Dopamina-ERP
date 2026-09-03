@@ -1002,6 +1002,10 @@ function SectorProfitabilityPage(props: Parameters<typeof SectionContent>[0]) {
   const [selectedSector, setSelectedSector] = useState<string | null>(null);
   const [productQuery, setProductQuery] = useState("");
   const [assigningExpense, setAssigningExpense] = useState("");
+  const [expenseQuery, setExpenseQuery] = useState("");
+  const [expenseCategory, setExpenseCategory] = useState("all");
+  const [expenseSector, setExpenseSector] = useState("all");
+  const [expenseStatus, setExpenseStatus] = useState("all");
   const operationalAreas = props.data.areas.filter((area) => area.is_operational);
   const sourceProducts = props.data.sectorProfitability.products;
   const totalRevenue = sourceProducts.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
@@ -1031,6 +1035,15 @@ function SectorProfitabilityPage(props: Parameters<typeof SectionContent>[0]) {
   const unassignedRevenue = unassignedProducts.reduce((sum, product) => sum + Number(product.revenue_cents) / 100, 0);
   const unassignedSources = [...new Set(unassignedProducts.map((product) => product.source_area))];
   const confirmedExpenses = props.expenses.filter((expense) => expense.status === "completed" || expense.status === "pending");
+  const expenseCategories = [...new Set(confirmedExpenses.map((expense) => expense.category))].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  const filteredAssignmentExpenses = confirmedExpenses.filter((expense) => {
+    const query = expenseQuery.trim().toLocaleLowerCase("pt-BR");
+    const matchesQuery = !query || `${expense.description} ${expense.category}`.toLocaleLowerCase("pt-BR").includes(query);
+    const matchesCategory = expenseCategory === "all" || expense.category === expenseCategory;
+    const matchesSector = expenseSector === "all" || (expenseSector === "unassigned" ? !expense.area_id : String(expense.area_id) === expenseSector);
+    const matchesStatus = expenseStatus === "all" || expense.status === expenseStatus;
+    return matchesQuery && matchesCategory && matchesSector && matchesStatus;
+  }).sort((a, b) => b.expense_date.localeCompare(a.expense_date) || a.description.localeCompare(b.description, "pt-BR"));
   const unassignedExpenseTotal = props.data.expenses.filter((expense) => operationalAreaName(nested(expense.areas)) === null).reduce((sum, expense) => sum + operationalExpenseAmount(expense, props.range), 0);
   const areaOptions = operationalAreas.map((area) => ({ sector: area.name, area }));
   async function assignExpense(expense: Expense, areaId: string) {
@@ -1052,7 +1065,31 @@ function SectorProfitabilityPage(props: Parameters<typeof SectionContent>[0]) {
       <div className="module-toolbar"><label><Search size={16} /><input value={productQuery} onChange={(event) => setProductQuery(event.target.value)} placeholder={`Buscar produto de ${selected.name}`} /></label><span className="table-count">{selectedProducts.length} produto(s)</span></div>
       <div className="data-table-card"><div className="responsive-table sector-products-table"><div className="table-row table-header"><span>Produto</span><span>Quantidade</span><span>Faturamento</span><span>CMV conhecido</span><span>Lucro bruto</span><span>Margem</span></div>{selectedProducts.length ? selectedProducts.map((product) => { const knownRevenue = Number(product.known_revenue_cents) / 100; const cmv = Number(product.known_cmv ?? 0); const profit = knownRevenue - cmv; const margin = knownRevenue > 0 ? profit / knownRevenue : null; return <div className="table-row" key={`${product.source_area}-${product.item_id}-${product.name}`}><strong>{product.name}<small className="sku-hint">{product.category || product.sku || "Sem categoria"}</small></strong><span>{NUMBER.format(Number(product.quantity))}</span><strong>{MONEY.format(Number(product.revenue_cents) / 100)}</strong><span>{knownRevenue > 0 ? MONEY.format(cmv) : "—"}</span><strong>{knownRevenue > 0 ? MONEY.format(profit) : "—"}</strong><span>{margin === null ? <small className="cost-badge missing">Sem custo</small> : `${NUMBER.format(margin * 100)}%`}</span></div>; }) : <EmptyMini text="Nenhum produto deste setor no período selecionado." />}</div></div>
     </section>}
-    <section className="sector-expense-assignment"><div className="sector-detail-head"><div><p>Classificação segura</p><h3>Despesas diretamente relacionadas</h3><span>Atribua somente quando a despesa pertencer claramente a um container. Deixe como geral quando houver dúvida.</span></div></div>{confirmedExpenses.length ? <div className="expense-assignment-list">{confirmedExpenses.map((expense) => <div key={expense.id}><span><strong>{expense.description}</strong><small>{expense.category} · {MONEY.format(expense.amount)}</small></span><select aria-label={`Setor da despesa ${expense.description}`} value={expense.area_id ?? ""} disabled={assigningExpense === expense.id} onChange={(event) => assignExpense(expense, event.target.value)}><option value="">Geral / não atribuída</option>{areaOptions.map((option) => <option key={option.sector} value={option.area.id}>{option.sector}</option>)}</select></div>)}</div> : <EmptyMini text="Nenhuma despesa paga ou pendente neste período para classificar." />}</section>
+    <section className="sector-expense-assignment">
+      <div className="sector-detail-head"><div><p>Classificação segura</p><h3>Despesas diretamente relacionadas</h3><span>Atribua somente quando a despesa pertencer claramente a um container. Deixe como geral quando houver dúvida.</span></div></div>
+      {confirmedExpenses.length ? <>
+        <div className="expense-assignment-filters">
+          <label><Search size={15} /><input type="search" value={expenseQuery} onChange={(event) => setExpenseQuery(event.target.value)} placeholder="Buscar despesa ou categoria" /></label>
+          <select aria-label="Filtrar por categoria" value={expenseCategory} onChange={(event) => setExpenseCategory(event.target.value)}><option value="all">Todas as categorias</option>{expenseCategories.map((category) => <option key={category} value={category}>{category}</option>)}</select>
+          <select aria-label="Filtrar por setor" value={expenseSector} onChange={(event) => setExpenseSector(event.target.value)}><option value="all">Todos os setores</option><option value="unassigned">Sem setor</option>{areaOptions.map((option) => <option key={option.area.id} value={option.area.id}>{option.sector}</option>)}</select>
+          <select aria-label="Filtrar por status" value={expenseStatus} onChange={(event) => setExpenseStatus(event.target.value)}><option value="all">Todos os status</option><option value="pending">Pendente</option><option value="completed">Pago</option></select>
+          <span className="table-count">{filteredAssignmentExpenses.length} despesa(s)</span>
+        </div>
+        <div className="expense-assignment-table-shell">
+          <div className="responsive-table expense-assignment-table">
+            <div className="table-row table-header"><span>Data</span><span>Despesa</span><span>Categoria</span><span>Status</span><span>Valor</span><span>Setor</span></div>
+            {filteredAssignmentExpenses.length ? filteredAssignmentExpenses.map((expense) => <div className="table-row" key={expense.id}>
+              <span>{dateLabel(expense.expense_date)}</span>
+              <strong title={expense.description}>{expense.description}</strong>
+              <span title={expense.category}>{expense.category}</span>
+              <span><small className={`expense-assignment-status ${expense.status}`}>{expense.status === "completed" ? "Pago" : "Pendente"}</small></span>
+              <strong>{MONEY.format(expense.amount)}</strong>
+              <select aria-label={`Setor da despesa ${expense.description}`} value={expense.area_id ?? ""} disabled={assigningExpense === expense.id} onChange={(event) => assignExpense(expense, event.target.value)}><option value="">Geral / não atribuída</option>{areaOptions.map((option) => <option key={option.sector} value={option.area.id}>{option.sector}</option>)}</select>
+            </div>) : <EmptyMini text="Nenhuma despesa encontrada com esses filtros." />}
+          </div>
+        </div>
+      </> : <EmptyMini text="Nenhuma despesa paga ou pendente neste período para classificar." />}
+    </section>
   </section>;
 }
 
