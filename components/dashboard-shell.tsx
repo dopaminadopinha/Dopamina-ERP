@@ -1622,7 +1622,7 @@ function ExpensesPage(props: Parameters<typeof SectionContent>[0]) {
     </div>
     <p className="expense-method-note"><TriangleAlert size={14} />O custo operacional considera despesas pagas e pendentes. Recorrências com vigência são projetadas e rateadas pelos dias de cada mês, sem criar lançamentos duplicados.</p>
     <div className="module-toolbar expense-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar despesa, categoria ou pagamento" /></label><select aria-label="Filtrar por categoria" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}><option value="all">Todas as categorias</option>{availableCategories.map((category) => <option key={category}>{category}</option>)}</select><select aria-label="Filtrar por comportamento" value={behaviorFilter} onChange={(event) => setBehaviorFilter(event.target.value)}><option value="all">Fixas e variáveis</option><option value="fixed">Fixas</option><option value="variable">Variáveis</option></select><select aria-label="Filtrar por recorrência" value={recurrenceFilter} onChange={(event) => setRecurrenceFilter(event.target.value)}><option value="all">Todas as recorrências</option><option value="recurring">Recorrentes</option><option value="single">Não recorrentes</option></select><select aria-label="Filtrar por status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option value="all">Todos os status</option><option value="completed">Pago</option><option value="pending">Pendente</option><option value="draft">Rascunho</option></select><span className="table-count">{props.refreshing ? "Atualizando..." : `${rows.length} lançamento(s)`}</span></div>
-    <div className="data-table-card"><div className="responsive-table expenses-table"><div className="table-row table-header"><span>Data</span><span>Descrição</span><span>Categoria</span><span>Tipo</span><span>Recorrência</span><span>Status</span><span>Valor</span><span></span></div>{rows.length ? rows.map((expense) => {
+    <div className="data-table-card expenses-table-scroll"><div className="responsive-table expenses-table"><div className="table-row table-header"><span>Data</span><span>Descrição</span><span>Categoria</span><span>Tipo</span><span>Recorrência</span><span>Status</span><span>Valor</span><span></span></div>{rows.length ? rows.map((expense) => {
       const canEdit = !expense.purchase_id && (!expense.source_type || expense.source_type === "structural_cost");
       const canDelete = !expense.purchase_id;
       const canTogglePayment = expense.status !== "cancelled";
@@ -1636,6 +1636,7 @@ function ExpensesPage(props: Parameters<typeof SectionContent>[0]) {
 }
 function ExpenseRowMenu({ label, onEdit, onDelete }: { label: string; onEdit?: () => void; onDelete?: () => void }) {
   const [open, setOpen] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     function outside(event: PointerEvent) { if (!ref.current?.contains(event.target as Node)) setOpen(false); }
@@ -1645,8 +1646,15 @@ function ExpenseRowMenu({ label, onEdit, onDelete }: { label: string; onEdit?: (
     return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
   }, []);
   if (!onEdit && !onDelete) return null;
-  return <div className="row-action-menu" ref={ref}>
-    <button className="row-action-trigger" type="button" aria-label={`Ações de ${label}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} /></button>
+  function toggleMenu() {
+    if (open) return setOpen(false);
+    const menuBounds = ref.current?.getBoundingClientRect();
+    const scrollBounds = ref.current?.closest(".expenses-table-scroll")?.getBoundingClientRect();
+    setOpenUp(Boolean(menuBounds && scrollBounds && scrollBounds.bottom - menuBounds.bottom < 82 && menuBounds.top - scrollBounds.top > 82));
+    setOpen(true);
+  }
+  return <div className={`row-action-menu ${openUp ? "open-up" : ""}`} ref={ref}>
+    <button className="row-action-trigger" type="button" aria-label={`Ações de ${label}`} aria-haspopup="menu" aria-expanded={open} onClick={toggleMenu}><MoreHorizontal size={16} /></button>
     {open && <div className="row-action-popover" role="menu">
       {onEdit && <button type="button" role="menuitem" onClick={() => { setOpen(false); onEdit(); }}><Pencil size={14} /> Editar</button>}
       {onDelete && <button type="button" role="menuitem" className="danger" onClick={() => { setOpen(false); onDelete(); }}><Trash2 size={14} /> Excluir</button>}

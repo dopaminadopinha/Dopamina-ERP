@@ -76,6 +76,7 @@ export function StructuralCostsSection({ businessId, areas, onChanged }: { busin
 
 function StructureActions({ row, onEdit, onDelete }: { row: Structure; onEdit: () => void; onDelete: () => Promise<void> }) {
   const [open, setOpen] = useState(false);
+  const [openUp, setOpenUp] = useState(false);
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -85,9 +86,16 @@ function StructureActions({ row, onEdit, onDelete }: { row: Structure; onEdit: (
     document.addEventListener("keydown", closeOnEscape);
     return () => { document.removeEventListener("pointerdown", closeOutside); document.removeEventListener("keydown", closeOnEscape); };
   }, []);
+  function toggleMenu() {
+    if (open) return setOpen(false);
+    const menuBounds = ref.current?.getBoundingClientRect();
+    const scrollBounds = ref.current?.closest(".structure-list-wrap")?.getBoundingClientRect();
+    setOpenUp(Boolean(menuBounds && scrollBounds && scrollBounds.bottom - menuBounds.bottom < 82 && menuBounds.top - scrollBounds.top > 82));
+    setOpen(true);
+  }
   async function remove() { setOpen(false); setBusy(true); await onDelete(); setBusy(false); }
-  return <div className="employee-menu structure-action-menu" ref={ref}>
-    <button className="employee-menu-trigger" type="button" aria-label={`Ações de ${row.name}`} aria-haspopup="menu" aria-expanded={open} disabled={busy} onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} /></button>
+  return <div className={`employee-menu structure-action-menu ${openUp ? "open-up" : ""}`} ref={ref}>
+    <button className="employee-menu-trigger" type="button" aria-label={`Ações de ${row.name}`} aria-haspopup="menu" aria-expanded={open} disabled={busy} onClick={toggleMenu}><MoreHorizontal size={16} /></button>
     {open && <div className="employee-menu-popover structure-action-popover" role="menu">
       <button type="button" role="menuitem" onClick={() => { setOpen(false); onEdit(); }}><Pencil size={14} /> Editar</button>
       <button type="button" role="menuitem" className="danger" onClick={remove}><Trash2 size={14} /> Excluir</button>
