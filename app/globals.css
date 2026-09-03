@@ -523,6 +523,12 @@ select option { background: var(--surface-2); color: var(--text-primary); }
 .stock-filter-summary span { color: #817b86; font-size: 10px; }
 .stock-filter-summary strong { color: #62dbae; font-size: 12px; text-align: right; }
 
+.dismissible-notice { position: relative; padding-right: 45px; }
+.dismissible-notice > button:not(.notice-dismiss) { margin-right: 28px; }
+.dismissible-notice > .notice-dismiss { position: absolute; top: 50%; right: 10px; width: 26px; min-height: 26px; height: 26px; margin: 0; padding: 0; display: grid; place-items: center; border: 0; border-radius: 5px; color: #77717c; background: transparent; transform: translateY(-50%); cursor: pointer; }
+.dismissible-notice > .notice-dismiss:hover { color: #ded9e1; background: rgba(255,255,255,.055); }
+.dismissible-notice > .notice-dismiss svg { width: 14px; height: 14px; color: currentColor; }
+
 @media (max-width: 640px) {
   .stock-filter-summary { align-items: flex-start; flex-direction: column; gap: 5px; }
   .stock-filter-summary strong { text-align: left; }

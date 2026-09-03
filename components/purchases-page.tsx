@@ -8,6 +8,7 @@ import {
 import { supabase } from "@/lib/supabase";
 import { useEscapeToClose } from "@/lib/use-escape-close";
 import { usePersistedTab } from "@/lib/use-persisted-tab";
+import { DismissibleNotice } from "@/components/dismissible-notice";
 
 type Range = { start: string; end: string };
 type Item = { id: string; name: string; sku: string | null; item_type: string; purchase_unit?: string | null; purchase_pack_quantity?: number | null; consumption_unit: string; areas: { id: string; name: string } | { id: string; name: string }[] | null };
@@ -107,7 +108,7 @@ export function PurchasesPage({ businessId, range, items, onItemsChanged }: { bu
   return <section className="purchase-page">
     <div className="module-hero"><div className="module-icon"><ShoppingBasket size={19} /></div><div><p>Compras e abastecimento</p><h2>Comprar melhor, receber com controle</h2><span>Pedidos, fornecedores, recebimentos, preços e reposição ligados ao estoque virtual.</span></div><button onClick={() => setPurchaseModal({})}>Nova compra</button></div>
     {loading && <p className="purchase-loading"><Clock3 size={15} />Carregando compras e preços reais...</p>}
-    {error && <div className="data-warning"><TriangleAlert size={14} /><div><strong>{error}</strong><span>Nenhum pedido, custo ou saldo foi alterado.</span></div><button onClick={reload}>Tentar novamente</button></div>}
+    {error && <DismissibleNotice noticeKey="compras-erro-carregamento"><TriangleAlert size={14} /><div><strong>{error}</strong><span>Nenhum pedido, custo ou saldo foi alterado.</span></div><button onClick={reload}>Tentar novamente</button></DismissibleNotice>}
     <div className="purchase-kpis">
       <PurchaseKpi label="Comprado no período" value={MONEY.format(Number(dashboard.summary.total))} note={`${dashboard.purchases.filter((row) => row.fulfillment_status !== "cancelled").length} compra(s)`} tone="green" />
       <PurchaseKpi label="Aguardando chegada" value={String(dashboard.summary.awaiting)} note="Pedidos sem recebimento" tone="yellow" />

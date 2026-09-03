@@ -5,6 +5,7 @@ import { CalendarClock, CheckCircle2, Clock3, MoreHorizontal, Pencil, Plus, Rece
 import { supabase } from "@/lib/supabase";
 import { useEscapeToClose } from "@/lib/use-escape-close";
 import { usePersistedTab } from "@/lib/use-persisted-tab";
+import { DismissibleNotice } from "@/components/dismissible-notice";
 
 type Range = { start: string; end: string };
 type Employee = { id: string; name: string; cpf: string | null; pix_key: string | null; default_hourly_rate: number | null; is_active: boolean; notes: string | null };
@@ -122,7 +123,7 @@ export function PersonnelPage({ businessId, userId, range, onExpensesChanged }: 
   return <section className="personnel-page">
     <div className="personnel-hero"><div><p>OPERAÇÃO E EQUIPE</p><h2>Funcionários e custo de pessoal</h2><span>Jornadas, pagamentos e custos reais conectados às despesas do ERP.</span></div><button onClick={() => setModal("employee")}><Plus size={16} /> Funcionário</button></div>
     <div className="personnel-tabs" role="tablist">{([['overview','Visão geral'],['team','Equipe'],['work','Jornadas e folha']] as const).map(([id,label]) => <button key={id} className={tab===id?'active':''} onClick={() => setTab(id)}>{label}</button>)}</div>
-    {error && <div className="personnel-alert"><TriangleAlert size={16}/>{error}</div>}
+    {error && <DismissibleNotice noticeKey="pessoal-erro-principal" className="personnel-alert"><TriangleAlert size={16}/>{error}</DismissibleNotice>}
     {loading ? <div className="personnel-loading">Carregando dados reais…</div> : <>
       {tab === "overview" && <>
         <div className="personnel-kpis"><Kpi label="Custo de pessoal" value={MONEY.format(total)} note={`${obligations.length} lançamento(s)`}/><Kpi label="Pago" value={MONEY.format(paid)} note="Baixado no financeiro" tone="green"/><Kpi label="Pendente" value={MONEY.format(pending)} note="Aguardando pagamento" tone="yellow"/><Kpi label="Horas registradas" value={`${NUMBER.format(hours)} h`} note={`${data.shifts.length} jornada(s)`}/><Kpi label="Média diária" value={MONEY.format(total / Math.max(1, daysBetween(range)))} note="No período selecionado"/><Kpi label="Peso no faturamento" value={revenue > 0 ? `${NUMBER.format(total/revenue*100)}%` : "—"} note={revenue > 0 ? "Sobre vendas reais da Zig" : "Sem faturamento no período"}/></div>
@@ -233,9 +234,9 @@ function DayConsumptionModal({businessId,employeeId,employeeName,date,onClose}:{
   },[businessId,employeeId,date]);
   const missingCost=data?.items.some(item=>!item.has_cost)??false;
   return <Modal title={`Consumo do dia · ${employeeName}`} subtitle={`${dateLabel(date)} · valores pelo preço de custo, usados para o desconto da jornada.`} onClose={onClose}>
-    {loading ? <div className="personnel-loading">Carregando…</div> : error ? <div className="personnel-alert"><TriangleAlert size={16}/>{error}</div> : !data || data.items.length===0 ? <Empty text="Nenhum consumo encontrado nesta data."/> : <>
+    {loading ? <div className="personnel-loading">Carregando…</div> : error ? <DismissibleNotice noticeKey="pessoal-consumo-dia-erro" className="personnel-alert"><TriangleAlert size={16}/>{error}</DismissibleNotice> : !data || data.items.length===0 ? <Empty text="Nenhum consumo encontrado nesta data."/> : <>
       <div className="personnel-kpis"><Kpi label="Desconto (custo)" value={MONEY.format(data.cost_cents/100)} note="Valor descontado da jornada" tone="yellow"/><Kpi label="Valor de venda" value={MONEY.format(data.sale_cents/100)} note="Preço normal, não cobrado do funcionário" tone="green"/></div>
-      {missingCost&&<div className="personnel-alert"><TriangleAlert size={16}/>Algum item não tem custo cadastrado e entrou como R$ 0,00 no desconto. Cadastre o custo do produto para refletir corretamente.</div>}
+      {missingCost&&<DismissibleNotice noticeKey="pessoal-consumo-sem-custo" className="personnel-alert"><TriangleAlert size={16}/>Algum item não tem custo cadastrado e entrou como R$ 0,00 no desconto. Cadastre o custo do produto para refletir corretamente.</DismissibleNotice>}
       <div className="closing-list">{data.items.map((item,index)=><div key={index}>
         <span><b>{item.product_name}</b><small>{NUMBER.format(item.quantity)}x · custo unitário {MONEY.format(item.unit_cost_cents/100)}{!item.has_cost?' (sem custo cadastrado)':''}</small></span>
         <strong>{MONEY.format(item.line_cost_cents/100)}</strong>
@@ -320,7 +321,7 @@ function ConsumptionModal({businessId,employeeId,employeeName,range,onClose}:{bu
     return ()=>{cancelled=true;};
   },[businessId,employeeId,range.start,range.end]);
   return <Modal title={`Consumo no bar · ${employeeName}`} subtitle="Itens comprados com o cartão Ziggy, casados pelo CPF cadastrado. Use para descontar do salário." onClose={onClose}>
-    {loading ? <div className="personnel-loading">Carregando…</div> : error ? <div className="personnel-alert"><TriangleAlert size={16}/>{error}</div> : !data || data.transactions.length===0 ? <Empty text="Nenhum consumo encontrado no período selecionado."/> : <>
+    {loading ? <div className="personnel-loading">Carregando…</div> : error ? <DismissibleNotice noticeKey="pessoal-consumo-periodo-erro" className="personnel-alert"><TriangleAlert size={16}/>{error}</DismissibleNotice> : !data || data.transactions.length===0 ? <Empty text="Nenhum consumo encontrado no período selecionado."/> : <>
       <div className="personnel-kpis"><Kpi label="Em aberto" value={MONEY.format(data.open_cents/100)} note="Ainda não pago na Zig" tone="yellow"/><Kpi label="Já pago" value={MONEY.format(data.paid_cents/100)} note="Quitado direto na Zig" tone="green"/></div>
       <div className="closing-list">{data.transactions.map(tx=><div key={tx.zig_transaction_id}>
         <span><b>{DATE.format(new Date(tx.purchased_at))}</b><small>{tx.items.length ? tx.items.map(item=>`${NUMBER.format(item.quantity)}x ${item.product_name}`).join(', ') : 'Itens não detalhados'}</small></span>
