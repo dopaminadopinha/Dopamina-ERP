@@ -382,6 +382,7 @@ function WeeklyShiftModal({businessId,employees,range,onClose,onSaved}:{business
   if(result.error)return setMessage(result.error.message);
   const summary=result.data as{created:number;errors:{shift_date:string;error:string}[]};
   if(summary.errors?.length){setMessage(`${summary.created} jornada(s) lançada(s). ${summary.errors.length} dia(s) com erro: ${summary.errors.map(row=>dateLabel(row.shift_date)).join(', ')}.`);return;}
+  window.alert(`${summary.created} dia(s) lançado(s) com sucesso para ${employees.find(row=>String(row.id)===employeeId)?.name ?? 'o funcionário'}.`);
   await onSaved();
  }
  return <Modal title="Lançar semana" subtitle="Marque os dias trabalhados e o horário de cada um; tudo é lançado de uma vez." onClose={onClose}>
