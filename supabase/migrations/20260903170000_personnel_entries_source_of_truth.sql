@@ -12,7 +12,23 @@ declare
   v_start timestamp;
   v_end timestamp;
   v_hours numeric;
+  v_financial_change boolean := false;
 begin
+  if tg_op = 'UPDATE' then
+    v_financial_change :=
+      new.business_id is distinct from old.business_id
+      or new.employee_id is distinct from old.employee_id
+      or new.area_id is distinct from old.area_id
+      or new.shift_date is distinct from old.shift_date
+      or new.input_mode is distinct from old.input_mode
+      or new.start_time is distinct from old.start_time
+      or new.end_time is distinct from old.end_time
+      or new.break_minutes is distinct from old.break_minutes
+      or new.hours_worked is distinct from old.hours_worked
+      or new.rate_snapshot is distinct from old.rate_snapshot
+      or new.amount_due is distinct from old.amount_due;
+  end if;
+
   select *
     into v_employee
     from public.employees
@@ -97,19 +113,7 @@ begin
 
   if tg_op = 'UPDATE'
      and old.payroll_closing_id is not null
-     and (
-       new.business_id is distinct from old.business_id
-       or new.employee_id is distinct from old.employee_id
-       or new.area_id is distinct from old.area_id
-       or new.shift_date is distinct from old.shift_date
-       or new.input_mode is distinct from old.input_mode
-       or new.start_time is distinct from old.start_time
-       or new.end_time is distinct from old.end_time
-       or new.break_minutes is distinct from old.break_minutes
-       or new.hours_worked is distinct from old.hours_worked
-       or new.rate_snapshot is distinct from old.rate_snapshot
-       or new.amount_due is distinct from old.amount_due
-     ) then
+     and v_financial_change then
     raise exception 'Esta jornada pertence a um fechamento. Exclua o fechamento antes de alterar valores';
   end if;
 
@@ -202,7 +206,19 @@ set search_path = ''
 as $$
 declare
   v_employee_area bigint;
+  v_financial_change boolean := false;
 begin
+  if tg_op = 'UPDATE' then
+    v_financial_change :=
+      new.business_id is distinct from old.business_id
+      or new.employee_id is distinct from old.employee_id
+      or new.area_id is distinct from old.area_id
+      or new.cost_date is distinct from old.cost_date
+      or new.cost_type is distinct from old.cost_type
+      or new.description is distinct from old.description
+      or new.amount is distinct from old.amount;
+  end if;
+
   if new.cost_date is null then
     raise exception 'Informe a data do custo de pessoal';
   end if;
@@ -234,15 +250,7 @@ begin
 
   if tg_op = 'UPDATE'
      and old.payroll_closing_id is not null
-     and (
-       new.business_id is distinct from old.business_id
-       or new.employee_id is distinct from old.employee_id
-       or new.area_id is distinct from old.area_id
-       or new.cost_date is distinct from old.cost_date
-       or new.cost_type is distinct from old.cost_type
-       or new.description is distinct from old.description
-       or new.amount is distinct from old.amount
-     ) then
+     and v_financial_change then
     raise exception 'Este custo pertence a um fechamento. Exclua o fechamento antes de alterar valores';
   end if;
 
