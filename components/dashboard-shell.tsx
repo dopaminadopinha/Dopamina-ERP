@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight, ArrowUpRight, BarChart3, Boxes, CalendarRange,
   CheckCircle2, ChefHat, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, FileBarChart2, FileSpreadsheet,
-  LayoutDashboard, LogOut, Menu, MoreHorizontal, PackageSearch, Pencil,
+  GripVertical, LayoutDashboard, LogOut, Menu, MoreHorizontal, PackageSearch, Pencil,
   Plus, ReceiptText, RefreshCw, Search, Settings, ShoppingBasket, ShoppingCart, Sparkles, Trash2, TrendingUp, TriangleAlert,
   UsersRound, WalletCards, X,
 } from "lucide-react";
@@ -91,11 +91,35 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: "cadastros", label: "Cadastros", icon: <ClipboardList size={19} /> },
   { id: "configuracoes", label: "Configurações", icon: <Settings size={19} /> },
 ];
+type NavGroup = "principal" | "sistema";
+type NavOrder = Record<NavGroup, Section[]>;
+const DEFAULT_NAV_ORDER: NavOrder = {
+  principal: NAV_ITEMS.slice(0, 11).map((item) => item.id),
+  sistema: NAV_ITEMS.slice(11).map((item) => item.id),
+};
+const SIDEBAR_ORDER_KEY = "dopamina:sidebar-order:v1";
 const SECTION_TABS = NAV_ITEMS.map((item) => item.id);
 const STOCK_TABS = ["stock", "movements", "inventories"] as const;
 const CATALOG_TABS = ["products", "ingredients", "areas"] as const;
 
 function nested<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
+function storedNavOrder(): NavOrder {
+  if (typeof window === "undefined") return DEFAULT_NAV_ORDER;
+  try {
+    const stored = JSON.parse(localStorage.getItem(SIDEBAR_ORDER_KEY) ?? "{}") as Partial<NavOrder>;
+    return {
+      principal: mergeNavOrder(stored.principal, DEFAULT_NAV_ORDER.principal),
+      sistema: mergeNavOrder(stored.sistema, DEFAULT_NAV_ORDER.sistema),
+    };
+  } catch {
+    return DEFAULT_NAV_ORDER;
+  }
+}
+function mergeNavOrder(stored: Section[] | undefined, defaults: Section[]) {
+  const allowed = new Set(defaults);
+  const valid = (stored ?? []).filter((id): id is Section => allowed.has(id));
+  return [...new Set([...valid, ...defaults])];
+}
 function dateLabel(value: string | null) { return value ? DATE.format(new Date(`${value}T00:00:00Z`)) : "—"; }
 function isoInSaoPaulo(date = new Date()) { const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date); const value = Object.fromEntries(parts.map((part) => [part.type, part.value])); return `${value.year}-${value.month}-${value.day}`; }
 function shiftDate(date: string, days: number) { const value = new Date(`${date}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10); }
@@ -172,6 +196,10 @@ export function DashboardShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCompact, setSidebarCompact] = useState(() => typeof window !== "undefined" && localStorage.getItem("dopamina-sidebar-compact") === "1");
   useEffect(() => { localStorage.setItem("dopamina-sidebar-compact", sidebarCompact ? "1" : "0"); }, [sidebarCompact]);
+  const [navOrder, setNavOrder] = useState<NavOrder>(storedNavOrder);
+  const [editingNavGroup, setEditingNavGroup] = useState<NavGroup | null>(null);
+  const [draggedNavItem, setDraggedNavItem] = useState<{ group: NavGroup; id: Section } | null>(null);
+  useEffect(() => { localStorage.setItem(SIDEBAR_ORDER_KEY, JSON.stringify(navOrder)); }, [navOrder]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [zigSyncing, setZigSyncing] = useState(false);
@@ -258,6 +286,59 @@ export function DashboardShell() {
   const visibleProfitabilityItems = data.profitabilityItems.filter((row) => selectedProfitabilityIds.has(String(row.import_id)));
 
   async function signOut() { await supabase.auth.signOut(); router.replace("/"); }
+  function moveNavItem(group: NavGroup, targetId: Section) {
+    if (!draggedNavItem || draggedNavItem.group !== group || draggedNavItem.id === targetId) return;
+    setNavOrder((current) => {
+      const next = [...current[group]];
+      const fromIndex = next.indexOf(draggedNavItem.id);
+      const targetIndex = next.indexOf(targetId);
+      if (fromIndex < 0 || targetIndex < 0) return current;
+      next.splice(fromIndex, 1);
+      next.splice(targetIndex, 0, draggedNavItem.id);
+      return { ...current, [group]: next };
+    });
+  }
+  function renderNavGroup(group: NavGroup, label: string, spaced = false) {
+    const editing = editingNavGroup === group;
+    const itemsById = new Map(NAV_ITEMS.map((item) => [item.id, item]));
+    return <div className={`nav-group ${editing ? "editing" : ""}`}>
+      <div className={`nav-group-header ${spaced ? "nav-caption-space" : ""}`}>
+        <span className="nav-caption">{editing ? `Organizar ${label.toLowerCase()}` : label}</span>
+        <button
+          type="button"
+          className={`nav-edit-button ${editing ? "active" : ""}`}
+          onClick={() => { setEditingNavGroup(editing ? null : group); setDraggedNavItem(null); }}
+          aria-label={editing ? `Concluir organização de ${label}` : `Editar ordem de ${label}`}
+          aria-pressed={editing}
+          title={editing ? "Concluir organização" : "Editar ordem"}
+        ><Pencil size={11} /></button>
+      </div>
+      {navOrder[group].map((id) => {
+        const item = itemsById.get(id);
+        if (!item) return null;
+        return <button
+          key={item.id}
+          type="button"
+          className={`nav-item ${section === item.id ? "active" : ""} ${editing ? "reorderable" : ""} ${draggedNavItem?.id === item.id ? "dragging" : ""}`}
+          draggable={editing}
+          onDragStart={(event) => {
+            setDraggedNavItem({ group, id: item.id });
+            event.dataTransfer.effectAllowed = "move";
+            event.dataTransfer.setData("text/plain", item.id);
+          }}
+          onDragOver={(event) => { if (editing) { event.preventDefault(); event.dataTransfer.dropEffect = "move"; } }}
+          onDrop={(event) => { event.preventDefault(); event.stopPropagation(); moveNavItem(group, item.id); setDraggedNavItem(null); }}
+          onDragEnd={() => setDraggedNavItem(null)}
+          onClick={() => {
+            if (editing) return;
+            setSection(item.id);
+            setSidebarOpen(false);
+          }}
+          title={editing ? `Arraste para reorganizar ${item.label}` : item.label}
+        >{item.icon}<span>{item.label}</span>{editing && <GripVertical className="nav-drag-handle" size={14} aria-hidden="true" />}</button>;
+      })}
+    </div>;
+  }
   if (loading) return <main className="app-loading"><Image src="/dopamina-logo.png" alt="Dopamina" width={88} height={82} unoptimized /><span>Organizando seus dados...</span></main>;
   if (fatalError) return <main className="access-state"><Image src="/dopamina-logo.png" alt="Dopamina" width={108} height={100} unoptimized /><h1>Algo não saiu como esperado</h1><p>{fatalError}</p><button onClick={() => location.reload()}>Tentar novamente</button></main>;
   if (!membership || membership.status !== "active") return <main className="access-state"><Image src="/dopamina-logo.png" alt="Dopamina" width={108} height={100} unoptimized /><div className="pending-pill">Cadastro recebido</div><h1>Seu acesso está aguardando aprovação</h1><p>Assim que o proprietário aprovar seu cadastro, o painel completo será liberado para você.</p><button onClick={signOut}>Sair da conta</button></main>;
@@ -267,7 +348,7 @@ export function DashboardShell() {
     {sidebarOpen && <button className="sidebar-backdrop" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu" />}
     <aside className={`sidebar ${sidebarOpen ? "open" : ""}`}>
       <div className="sidebar-brand"><div className="sidebar-logo"><Image src="/ChatGPT Image 17 de ago. de 2026, 18_45_08.png" alt="Dopamina Gastrobar" width={2172} height={724} priority unoptimized /></div><button className="close-sidebar-mobile" onClick={() => setSidebarOpen(false)} aria-label="Fechar menu"><X size={20} /></button></div>
-      <nav className="sidebar-nav" aria-label="Navegação principal"><span className="nav-caption">Principal</span>{NAV_ITEMS.slice(0, 11).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}<span className="nav-caption nav-caption-space">Sistema</span>{NAV_ITEMS.slice(11).map((item) => <button key={item.id} className={section === item.id ? "active" : ""} onClick={() => { setSection(item.id); setSidebarOpen(false); }} title={item.label}>{item.icon}<span>{item.label}</span></button>)}</nav>
+      <nav className="sidebar-nav" aria-label="Navegação principal">{renderNavGroup("principal", "Principal")}{renderNavGroup("sistema", "Sistema", true)}</nav>
       <div className="sidebar-footer"><button className="user-menu" title={profile?.full_name ?? "Usuário"}><span className="user-avatar">{(profile?.full_name ?? "D").charAt(0).toUpperCase()}</span><span className="user-copy"><strong>{profile?.full_name ?? "Usuário"}</strong><small>{membership.role === "owner" ? "Proprietário" : "Gerência"}</small></span></button><button className="logout-button" onClick={signOut} aria-label="Sair"><LogOut size={18} /></button></div>
       <button className="compact-toggle" onClick={() => setSidebarCompact((current) => !current)} aria-label={sidebarCompact ? "Expandir menu" : "Recolher menu"}>{sidebarCompact ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}</button>
     </aside>
