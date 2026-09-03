@@ -67,17 +67,81 @@ export async function PATCH(request:NextRequest,{params}:{params:Promise<{id:str
   }catch(error){return Response.json({error:error instanceof Error?error.message:"Não foi possível editar a compra."},{status:500});}
 }
 
+type ReceiptRow={id:number;received_at:string};
+type ReceiptItemRow={id:number;receipt_id:number;item_id:number;quantity:number;unit_cost:number};
+type JoinedReceipt={received_at:string;purchase_id:number;business_id:number};
+
+function joinedReceipt(value:JoinedReceipt|JoinedReceipt[]|null){return Array.isArray(value)?value[0]??null:value;}
+
+async function recalculatePurchaseCosts(admin:ReturnType<typeof createAdminClient>,businessId:number,purchaseId:number,userId:string,receiptItems:ReceiptItemRow[],receipts:ReceiptRow[]){
+  const receiptDates=new Map(receipts.map(receipt=>[Number(receipt.id),receipt.received_at.slice(0,10)]));
+  const datesByItem=new Map<number,Set<string>>();
+  receiptItems.forEach(item=>{const date=receiptDates.get(Number(item.receipt_id));if(!date)return;const dates=datesByItem.get(Number(item.item_id))??new Set<string>();dates.add(date);datesByItem.set(Number(item.item_id),dates);});
+  const today=new Date().toISOString().slice(0,10);
+
+  for(const [itemId,dates] of datesByItem){
+    const remainingResult=await admin.from("purchase_receipt_items").select("id,quantity,unit_cost,purchase_receipts!inner(received_at,purchase_id,business_id)").eq("item_id",itemId).eq("purchase_receipts.business_id",businessId);
+    if(remainingResult.error)throw remainingResult.error;
+    const remaining=(remainingResult.data??[]) as unknown as {id:number;quantity:number;unit_cost:number;purchase_receipts:JoinedReceipt|JoinedReceipt[]|null}[];
+    for(const date of dates){
+      const latest=[...remaining].filter(row=>joinedReceipt(row.purchase_receipts)?.received_at.slice(0,10)===date).sort((a,b)=>{const receiptOrder=(joinedReceipt(b.purchase_receipts)?.received_at??"").localeCompare(joinedReceipt(a.purchase_receipts)?.received_at??"");return receiptOrder||Number(b.id)-Number(a.id);})[0];
+      if(latest){
+        const source=joinedReceipt(latest.purchase_receipts)!;
+        const restored=await admin.from("item_cost_history").upsert({business_id:businessId,item_id:itemId,unit_cost:Number(latest.unit_cost),effective_from:date,source:"purchase",notes:`Custo confirmado no recebimento da compra ${source.purchase_id}`,created_by:userId,updated_at:new Date().toISOString()},{onConflict:"item_id,effective_from"});
+        if(restored.error)throw restored.error;
+      }else{
+        const removed=await admin.from("item_cost_history").delete().eq("business_id",businessId).eq("item_id",itemId).eq("effective_from",date).eq("source","purchase");
+        if(removed.error)throw removed.error;
+      }
+    }
+    const latestCostResult=await admin.from("item_cost_history").select("unit_cost").eq("business_id",businessId).eq("item_id",itemId).lte("effective_from",today).order("effective_from",{ascending:false}).order("id",{ascending:false}).limit(1).maybeSingle();
+    if(latestCostResult.error)throw latestCostResult.error;
+    const weightedQuantity=remaining.reduce((sum,row)=>sum+Number(row.quantity),0);
+    const weightedCost=weightedQuantity>0?remaining.reduce((sum,row)=>sum+Number(row.quantity)*Number(row.unit_cost),0)/weightedQuantity:null;
+    const latestCost=latestCostResult.data?Number(latestCostResult.data.unit_cost):null;
+    const itemUpdated=await admin.from("items").update({latest_unit_cost:latestCost,average_unit_cost:weightedCost??latestCost,updated_at:new Date().toISOString()}).eq("id",itemId).eq("business_id",businessId);
+    if(itemUpdated.error)throw itemUpdated.error;
+  }
+  return {itemCount:datesByItem.size,lineCount:receiptItems.length,purchaseId};
+}
+
 export async function DELETE(request:NextRequest,{params}:{params:Promise<{id:string}>}){
   try{
-    const purchaseId=Number((await params).id);const businessId=Number(request.nextUrl.searchParams.get("businessId"));
+    const purchaseId=Number((await params).id);const businessId=Number(request.nextUrl.searchParams.get("businessId"));const reverseStock=request.nextUrl.searchParams.get("reverseStock")==="true";
     if(!Number.isInteger(purchaseId)||!Number.isInteger(businessId))return Response.json({error:"Compra inválida."},{status:400});
     const auth=await authorize(request,businessId);if(!auth)return Response.json({error:"Autenticação obrigatória."},{status:401});
     const {admin,userId}=auth;
     const {data:purchase}=await admin.from("purchases").select("id,code").eq("id",purchaseId).eq("business_id",businessId).maybeSingle();if(!purchase)return Response.json({error:"Compra não encontrada."},{status:404});
-    if(await hasReceipts(admin,purchaseId))return Response.json({error:"Uma compra com recebimento confirmado não pode ser excluída, pois já movimentou o estoque."},{status:409});
+    const receiptsResult=await admin.from("purchase_receipts").select("id,received_at").eq("purchase_id",purchaseId).eq("business_id",businessId);
+    if(receiptsResult.error)throw receiptsResult.error;
+    const receipts=(receiptsResult.data??[]) as ReceiptRow[];
+    if(receipts.length&&!reverseStock)return Response.json({error:"Esta compra já movimentou o estoque. Confirme a reversão do estoque para excluí-la.",requiresStockReversal:true},{status:409});
+    let reversal={itemCount:0,lineCount:0,purchaseId};let costRecalculationWarning:string|null=null;
+    if(receipts.length){
+      const receiptIds=receipts.map(receipt=>Number(receipt.id));
+      const receiptItemsResult=await admin.from("purchase_receipt_items").select("id,receipt_id,item_id,quantity,unit_cost").in("receipt_id",receiptIds);
+      if(receiptItemsResult.error)throw receiptItemsResult.error;
+      const receiptItems=(receiptItemsResult.data??[]) as ReceiptItemRow[];
+      const receiptItemIds=receiptItems.map(item=>Number(item.id));
+      if(receiptItemIds.length){
+        const movementsResult=await admin.from("stock_movements").select("id,source_id,item_id,quantity").eq("business_id",businessId).eq("source_table","purchase_receipt_items").in("source_id",receiptItemIds);
+        if(movementsResult.error)throw movementsResult.error;
+        const movements=movementsResult.data??[];
+        const movementsBySource=new Map(movements.map(row=>[Number(row.source_id),row]));
+        const safe=movements.length===receiptItems.length&&receiptItems.every(item=>{const movement=movementsBySource.get(Number(item.id));return movement&&Number(movement.item_id)===Number(item.item_id)&&Math.abs(Number(movement.quantity)-Number(item.quantity))<0.00001;});
+        if(!safe)return Response.json({error:"Não foi possível conferir todas as entradas desta compra. O estoque e a compra foram preservados para evitar uma reversão incorreta."},{status:409});
+        const movementsRemoved=await admin.from("stock_movements").delete().eq("business_id",businessId).eq("source_table","purchase_receipt_items").in("source_id",receiptItemIds);
+        if(movementsRemoved.error)throw movementsRemoved.error;
+        const receiptItemsRemoved=await admin.from("purchase_receipt_items").delete().in("id",receiptItemIds);
+        if(receiptItemsRemoved.error)throw receiptItemsRemoved.error;
+      }
+      const receiptsRemoved=await admin.from("purchase_receipts").delete().eq("business_id",businessId).eq("purchase_id",purchaseId);
+      if(receiptsRemoved.error)throw receiptsRemoved.error;
+      try{reversal=await recalculatePurchaseCosts(admin,businessId,purchaseId,userId,receiptItems,receipts);}catch(costError){costRecalculationWarning=costError instanceof Error?costError.message:"Falha ao recalcular custos";reversal={itemCount:new Set(receiptItems.map(item=>Number(item.item_id))).size,lineCount:receiptItems.length,purchaseId};}
+    }
     const expenseRemoved=await admin.from("expenses").delete().eq("business_id",businessId).eq("purchase_id",purchaseId);if(expenseRemoved.error)throw expenseRemoved.error;
     const purchaseRemoved=await admin.from("purchases").delete().eq("id",purchaseId).eq("business_id",businessId);if(purchaseRemoved.error)throw purchaseRemoved.error;
-    await admin.from("audit_logs").insert({business_id:businessId,user_id:userId,action:"purchase_deleted",entity_table:"purchases",entity_id:String(purchaseId),details:{code:purchase.code}});
-    return Response.json({ok:true});
+    await admin.from("audit_logs").insert({business_id:businessId,user_id:userId,action:receipts.length?"purchase_stock_reversed_and_deleted":"purchase_deleted",entity_table:"purchases",entity_id:String(purchaseId),details:{code:purchase.code,reversed_stock:receipts.length>0,reversed_items:reversal.itemCount,reversed_lines:reversal.lineCount,cost_recalculation_warning:costRecalculationWarning}});
+    return Response.json({ok:true,reversedStock:receipts.length>0,reversal,costRecalculationWarning});
   }catch(error){return Response.json({error:error instanceof Error?error.message:"Não foi possível excluir a compra."},{status:500});}
 }

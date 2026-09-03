@@ -460,6 +460,11 @@ select option { background: var(--surface-2); color: var(--text-primary); }
 /* Keep purchase filters compact and consistent with the ERP typography. */
 .purchase-toolbar select { font-size: 10.5px; }
 
+.purchase-delete-warning { margin-top: 18px; padding: 13px 14px; display: flex; align-items: flex-start; gap: 11px; border: 1px solid rgba(255,137,150,.2); border-radius: 7px; color: #ee929e; background: rgba(255,107,124,.055); }
+.purchase-delete-warning svg { flex: 0 0 auto; margin-top: 1px; }.purchase-delete-warning strong,.purchase-delete-warning span { display: block; }.purchase-delete-warning strong { font-size: 12px; }.purchase-delete-warning span { margin-top: 4px; color: #978d96; font-size: 10.5px; line-height: 1.45; }
+.purchase-delete-items { max-height: 210px; margin-top: 10px; overflow-y: auto; border: 1px solid var(--border); border-radius: 7px; }.purchase-delete-items > div { min-height: 43px; padding: 9px 12px; display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid var(--line); }.purchase-delete-items > div:last-child { border-bottom: 0; }.purchase-delete-items span { color: #b7b0ba; font-size: 11px; }.purchase-delete-items strong { color: #ee929e; font-size: 11px; white-space: nowrap; }
+.purchase-delete-note { margin: 13px 0 0; color: #817a84; font-size: 10.5px; line-height: 1.55; }.modal-danger { min-height: 42px; padding: 0 17px; border: 1px solid rgba(255,107,124,.28); border-radius: 6px; color: #ff9aa5; background: rgba(255,107,124,.08); cursor: pointer; font-size: 11px; font-weight: 700; }.modal-danger:hover { background: rgba(255,107,124,.13); }.modal-danger:disabled { cursor: wait; opacity: .55; }
+
 @media (max-width: 640px) {
   .ov-dashboard .finance-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
