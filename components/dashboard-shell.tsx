@@ -6,8 +6,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight, ArrowUpRight, BarChart3, Boxes, CalendarRange,
   CheckCircle2, ChefHat, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, FileBarChart2, FileSpreadsheet,
-  FileUp, LayoutDashboard, LogOut, Menu, MoreHorizontal, PackageSearch, Pencil,
-  Plus, ReceiptText, Search, Settings, ShoppingBasket, ShoppingCart, Sparkles, Trash2, TrendingUp, TriangleAlert,
+  LayoutDashboard, LogOut, Menu, MoreHorizontal, PackageSearch, Pencil,
+  Plus, ReceiptText, RefreshCw, Search, Settings, ShoppingBasket, ShoppingCart, Sparkles, Trash2, TrendingUp, TriangleAlert,
   UsersRound, WalletCards, X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -167,6 +167,8 @@ export function DashboardShell() {
   useEffect(() => { localStorage.setItem("dopamina-sidebar-compact", sidebarCompact ? "1" : "0"); }, [sidebarCompact]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [zigSyncing, setZigSyncing] = useState(false);
+  const [zigSyncMessage, setZigSyncMessage] = useState("");
   const [profile, setProfile] = useState<Profile | null>(null);
   const [membership, setMembership] = useState<Membership | null>(null);
   const [userId, setUserId] = useState("");
@@ -182,6 +184,36 @@ export function DashboardShell() {
     setRefreshing(true);
     try { setData(await fetchData(businessId, requestedRange)); setFatalError(""); } catch { setFatalError("Não foi possível carregar os dados do painel."); }
     finally { setRefreshing(false); }
+  }
+
+  async function synchronizeZig() {
+    setZigSyncing(true);
+    setZigSyncMessage("");
+    const { data: session } = await supabase.auth.getSession();
+    const token = session.session?.access_token;
+    if (!token) {
+      setZigSyncMessage("Sua sessão expirou. Entre novamente.");
+      setZigSyncing(false);
+      return;
+    }
+    try {
+      const response = await fetch("/api/zig/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ startDate: range.start, endDate: range.end }),
+      });
+      const result = await response.json() as { error?: string; status?: string; results?: { status: string; error?: string }[] };
+      const detailedError = result.error ?? result.results?.find((row) => row.status === "failed")?.error;
+      if (!response.ok) throw new Error(detailedError ?? "A sincronização falhou sem informar o motivo.");
+      setZigSyncMessage(result.status === "partial"
+        ? `Sincronização parcial${detailedError ? `: ${detailedError}` : ". Consulte o histórico de integrações."}`
+        : "Sincronização concluída com dados reais da Zig.");
+      await refresh(membership?.business_id, range);
+    } catch (error) {
+      setZigSyncMessage(error instanceof Error ? error.message : "Não foi possível sincronizar a Zig.");
+    } finally {
+      setZigSyncing(false);
+    }
   }
 
   useEffect(() => {
@@ -232,8 +264,8 @@ export function DashboardShell() {
       <div className="sidebar-footer"><button className="user-menu" title={profile?.full_name ?? "Usuário"}><span className="user-avatar">{(profile?.full_name ?? "D").charAt(0).toUpperCase()}</span><span className="user-copy"><strong>{profile?.full_name ?? "Usuário"}</strong><small>{membership.role === "owner" ? "Proprietário" : "Gerência"}</small></span></button><button className="logout-button" onClick={signOut} aria-label="Sair"><LogOut size={18} /></button></div>
       <button className="compact-toggle" onClick={() => setSidebarCompact((current) => !current)} aria-label={sidebarCompact ? "Expandir menu" : "Recolher menu"}>{sidebarCompact ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}</button>
     </aside>
-    <main className="workspace"><header className="workspace-header"><div><p className="breadcrumb">Dopamina / {activeNav.label}</p><h1>{activeNav.label}</h1></div><div className="workspace-actions"><label className="search-box"><Search size={17} /><input type="search" placeholder="Buscar no sistema" /><kbd>⌘ K</kbd></label><select className="period-select" value={period} onChange={(event) => { const next = event.target.value; setPeriod(next); refresh(membership.business_id, selectedRange(next, customStart, customEnd)); }} aria-label="Período"><option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="this_week">Esta semana</option><option value="this_month">Este mês</option><option value="last_month">Mês anterior</option><option value="custom">Período personalizado</option></select>{period === "custom" && <div className="custom-period"><input aria-label="Início do período" type="date" value={customStart} max={customEnd} onChange={(event) => { const next = event.target.value; setCustomStart(next); refresh(membership.business_id, selectedRange("custom", next, customEnd)); }} /><span>até</span><input aria-label="Fim do período" type="date" value={customEnd} min={customStart} onChange={(event) => { const next = event.target.value; setCustomEnd(next); refresh(membership.business_id, selectedRange("custom", customStart, next)); }} /></div>}</div></header>
-      <div className="workspace-content"><SectionContent section={section} setSection={setSection} businessId={membership.business_id} userId={userId} data={data} sales={visibleSales} saleItems={visibleItems} expenses={visibleExpenses} profitabilityImports={visibleProfitabilityImports} profitabilityItems={visibleProfitabilityItems} range={range} refreshing={refreshing} onRefresh={() => refresh()} /></div>
+    <main className="workspace"><header className="workspace-header"><div><p className="breadcrumb">Dopamina / {activeNav.label}</p><h1>{activeNav.label}</h1></div><div className="workspace-actions"><button type="button" className="header-zig-sync" onClick={synchronizeZig} disabled={zigSyncing} title="Sincronizar o período selecionado com a Zig"><RefreshCw size={15} className={zigSyncing ? "spinning" : ""} /><span>{zigSyncing ? "Sincronizando..." : "Sincronizar Zig"}</span></button><label className="search-box"><Search size={17} /><input type="search" placeholder="Buscar no sistema" /><kbd>⌘ K</kbd></label><select className="period-select" value={period} onChange={(event) => { const next = event.target.value; setPeriod(next); refresh(membership.business_id, selectedRange(next, customStart, customEnd)); }} aria-label="Período"><option value="today">Hoje</option><option value="yesterday">Ontem</option><option value="this_week">Esta semana</option><option value="this_month">Este mês</option><option value="last_month">Mês anterior</option><option value="custom">Período personalizado</option></select>{period === "custom" && <div className="custom-period"><input aria-label="Início do período" type="date" value={customStart} max={customEnd} onChange={(event) => { const next = event.target.value; setCustomStart(next); refresh(membership.business_id, selectedRange("custom", next, customEnd)); }} /><span>até</span><input aria-label="Fim do período" type="date" value={customEnd} min={customStart} onChange={(event) => { const next = event.target.value; setCustomEnd(next); refresh(membership.business_id, selectedRange("custom", customStart, next)); }} /></div>}</div></header>
+      <div className="workspace-content">{zigSyncMessage && <div className={zigSyncMessage.includes("concluída") ? "sync-message success global-sync-message" : "sync-message global-sync-message"}>{zigSyncMessage}</div>}<SectionContent section={section} setSection={setSection} businessId={membership.business_id} userId={userId} data={data} sales={visibleSales} saleItems={visibleItems} expenses={visibleExpenses} profitabilityImports={visibleProfitabilityImports} profitabilityItems={visibleProfitabilityItems} range={range} refreshing={refreshing} onRefresh={() => refresh()} /></div>
     </main>
   </div>;
 }
@@ -260,8 +292,8 @@ function SectionContent(props: { section: Section; setSection: (section: Section
   return <section className="module-page"><ModuleHero {...current} /><div className="data-table-card"><div className="data-table-head">{current.columns.map((column) => <span key={column}>{column}</span>)}</div><div className="empty-table"><div>{current.icon}</div><h3>Este módulo será a próxima etapa</h3><p>Vendas e despesas já usam a base central. Agora podemos conectar este módulo aos mesmos dados.</p></div></div></section>;
 }
 
-function ModuleHero({ eyebrow, title, description, action, icon, onAction }: { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; onAction?: () => void }) {
-  return <div className="module-hero"><div className="module-icon">{icon}</div><div><p>{eyebrow}</p><h2>{title}</h2><span>{description}</span></div><button onClick={onAction}>{action}</button></div>;
+function ModuleHero({ eyebrow, title, description, action, icon, onAction }: { eyebrow: string; title: string; description: string; action?: string; icon: React.ReactNode; onAction?: () => void }) {
+  return <div className="module-hero"><div className="module-icon">{icon}</div><div><p>{eyebrow}</p><h2>{title}</h2><span>{description}</span></div>{action && <button onClick={onAction}>{action}</button>}</div>;
 }
 
 type FinancialDay = { date: string; revenue: number; expenses: number; result: number };
@@ -309,7 +341,7 @@ function Overview({ sales, expenses, data, setSection, range }: Parameters<typeo
   const previousLabel = `${dateLabel(previousRange.start)} a ${dateLabel(previousRange.end)}`;
 
   return <section className="overview-page finance-dashboard ov-dashboard">
-    <div className="overview-intro finance-intro"><div><p className="page-kicker">Dashboard financeira</p><h2>Dashboard</h2><span>{periodLabel} · comparação com {previousLabel}</span></div><button className="accent-button" onClick={() => setSection("vendas")}><FileUp size={17} /> Sincronizar com a Zig</button></div>
+    <div className="overview-intro finance-intro"><div><p className="page-kicker">Dashboard financeira</p><h2>Dashboard</h2><span>{periodLabel} · comparação com {previousLabel}</span></div></div>
     <div className="finance-source-note"><CheckCircle2 size={17} /><span>{zigConnected ? "Faturamento real da Zig" : sales.length ? "Faturamento do relatório importado" : "Nenhum faturamento encontrado"}</span><i /> <span>Despesas reais cadastradas no ERP</span></div>
 
     <div className="finance-metric-grid">
@@ -740,8 +772,6 @@ function SalesPage(props: Parameters<typeof SectionContent>[0]) {
   const [showImport, setShowImport] = useState(false);
   const [query, setQuery] = useState("");
   const [productSort, setProductSort] = useState<"revenue" | "quantity" | "lowest">("revenue");
-  const [syncing, setSyncing] = useState(false);
-  const [syncMessage, setSyncMessage] = useState("");
   const apiHasData = props.data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
   const gross = apiHasData ? Number(props.data.zig.summary.gross_cents) / 100 : props.sales.reduce((sum, sale) => sum + Number(sale.gross_amount), 0);
   const discounts = apiHasData ? Number(props.data.zig.summary.discount_cents) / 100 : props.sales.reduce((sum, sale) => sum + Number(sale.discount_amount), 0);
@@ -779,9 +809,7 @@ function SalesPage(props: Parameters<typeof SectionContent>[0]) {
   const leastSold = grouped.filter((row) => row.quantity > 0).sort((a, b) => a.quantity - b.quantity || a.net - b.net).slice(0, 5);
   const filteredProducts = grouped.filter((row) => `${row.name} ${row.category} ${row.area}`.toLowerCase().includes(query.toLowerCase())).sort((a, b) => productSort === "quantity" ? b.quantity - a.quantity : productSort === "lowest" ? a.quantity - b.quantity || a.net - b.net : b.net - a.net);
   const apiPayments = props.data.zig.payments.map((row, index) => ({ id: `zig-${index}`, import_id: "zig", payment_method: row.payment_name, amount: Number(row.value_cents) / 100, percentage: null }));
-  async function synchronize() { setSyncing(true); setSyncMessage(""); const { data: session } = await supabase.auth.getSession(); const token = session.session?.access_token; if (!token) { setSyncMessage("Sua sessão expirou. Entre novamente."); setSyncing(false); return; } try { const response = await fetch("/api/zig/sync", { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` }, body: JSON.stringify({ startDate: props.range.start, endDate: props.range.end }) }); const result = await response.json() as { error?: string; status?: string; results?: { endpoint: string; date: string; status: string; error?: string }[] }; const detailedError = result.error ?? result.results?.find((row) => row.status === "failed")?.error; if (!response.ok) throw new Error(detailedError ?? "A sincronização falhou sem informar o motivo."); setSyncMessage(result.status === "partial" ? `Sincronização parcial${detailedError ? `: ${detailedError}` : ". Consulte o histórico de integrações."}` : "Sincronização concluída com dados reais da Zig."); await props.onRefresh(); } catch (error) { setSyncMessage(error instanceof Error ? error.message : "Não foi possível sincronizar a Zig."); } finally { setSyncing(false); } }
-  return <section className="sales-page"><ModuleHero eyebrow="Resultados" title="Vendas e faturamento" description={apiHasData ? "Visão gerencial das vendas reais sincronizadas da Zig; estornos são excluídos." : "Sem dados da API neste período; exibindo o relatório disponível quando houver."} action={syncing ? "Sincronizando..." : "Sincronizar agora"} icon={<ShoppingCart size={19} />} onAction={syncing ? undefined : synchronize} />
-    {syncMessage && <div className={syncMessage.includes("concluída") ? "sync-message success" : "sync-message"}>{syncMessage}</div>}
+  return <section className="sales-page"><ModuleHero eyebrow="Resultados" title="Vendas e faturamento" description={apiHasData ? "Visão gerencial das vendas reais sincronizadas da Zig; estornos são excluídos." : "Sem dados da API neste período; exibindo o relatório disponível quando houver."} icon={<ShoppingCart size={19} />} />
     {!apiHasData && props.sales.length > 0 && <div className="sales-data-note"><TriangleAlert size={15} /><span>O relatório importado não informa a quantidade de transações. Ticket médio e vendas aparecem como indisponíveis até a sincronização da Zig.</span></div>}
     <div className="sales-kpi-grid"><SalesKpi label="Faturamento líquido" value={MONEY.format(revenue)} note="Vendas após descontos" tone="green" /><SalesKpi label="Faturamento bruto" value={MONEY.format(gross)} note="Antes dos descontos" /><SalesKpi label="Itens vendidos" value={NUMBER.format(quantity)} note={`${grouped.length} produto(s) no período`} /><SalesKpi label="Vendas / transações" value={transactionCount === null ? "—" : NUMBER.format(transactionCount)} note={apiHasData ? "Transações válidas da Zig" : "Dado indisponível"} /><SalesKpi label="Ticket médio" value={averageTicket === null ? "—" : MONEY.format(averageTicket)} note="Faturamento líquido por venda" tone="purple" /><SalesKpi label="Total de descontos" value={MONEY.format(discounts)} note={gross > 0 ? `${NUMBER.format(discounts / gross * 100)}% do faturamento bruto` : "Sem faturamento bruto"} tone="yellow" /><SalesKpi label="Média por dia" value={MONEY.format(averageDailyRevenue)} note={`${rangeDays(props.range)} dia(s) selecionado(s)`} /><SalesKpi label="Dias com venda" value={NUMBER.format(sellingDays.length)} note={`de ${rangeDays(props.range)} dia(s) no período`} /></div>
 
