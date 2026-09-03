@@ -1,8 +1,8 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
-import { fetchRevenue, fetchSoldProducts, ZigApiError, zigConfiguration } from "./client";
-import { formatZigDate, normalizePaymentRows, normalizeProductRows } from "./normalize";
+import { fetchBuyers, fetchRevenue, fetchSoldProducts, ZigApiError, zigConfiguration } from "./client";
+import { formatZigDate, normalizeBuyerRows, normalizePaymentRows, normalizeProductRows } from "./normalize";
 
-type Endpoint = "saida-produtos" | "faturamento";
+type Endpoint = "saida-produtos" | "faturamento" | "compradores";
 type SyncResult = { endpoint: Endpoint; date: string; status: "completed" | "failed"; rows: number; totalCents?: number; error?: string };
 
 function requiredServerEnv(name: "NEXT_PUBLIC_SUPABASE_URL" | "SUPABASE_SERVICE_ROLE_KEY") {
@@ -92,6 +92,24 @@ async function syncRevenue(admin: SupabaseClient, businessId: number, date: stri
   }
 }
 
+async function syncBuyers(admin: SupabaseClient, businessId: number, date: string): Promise<SyncResult> {
+  const endpoint: Endpoint = "compradores";
+  const runId = await startRun(admin, businessId, endpoint, date);
+  try {
+    const rows = normalizeBuyerRows(await fetchBuyers(formatZigDate(date)));
+    const { error } = await admin.rpc("sync_zig_employee_consumption_day", {
+      p_business_id: businessId,
+      p_operational_date: date,
+      p_rows: rows,
+      p_run_id: runId,
+    });
+    if (error) throw error;
+    return { endpoint, date, status: "completed", rows: rows.length };
+  } catch (error) {
+    return { endpoint, date, status: "failed", rows: 0, error: await markFailure(admin, businessId, endpoint, date, runId, error) };
+  }
+}
+
 function isoDates(startDate: string, endDate: string) {
   const start = new Date(`${startDate}T12:00:00Z`);
   const end = new Date(`${endDate}T12:00:00Z`);
@@ -111,6 +129,7 @@ export async function syncZigRange(businessId: number, startDate: string, endDat
     // A API apresentou falhas em intervalos grandes; os endpoints são consultados um por vez e por dia.
     results.push(await syncProducts(admin, businessId, date));
     results.push(await syncRevenue(admin, businessId, date));
+    results.push(await syncBuyers(admin, businessId, date));
   }
   return {
     startDate,
