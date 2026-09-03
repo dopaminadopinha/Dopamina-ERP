@@ -40,6 +40,7 @@ export function PurchasesPage({ businessId, range, items, onItemsChanged }: { bu
   const [supplierModal, setSupplierModal] = useState<Supplier | "new" | null>(null);
   const [purchaseModal, setPurchaseModal] = useState<{ initial?: Replenishment[]; purchase?: Purchase } | null>(null);
   const [receivePurchase, setReceivePurchase] = useState<Purchase | null>(null);
+  const [deletePurchaseTarget, setDeletePurchaseTarget] = useState<Purchase | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [supplierFilter, setSupplierFilter] = useState("all");
@@ -98,7 +99,8 @@ export function PurchasesPage({ businessId, range, items, onItemsChanged }: { bu
     await reload();
   }
   function editPurchase(purchase:Purchase){if(purchase.receipts.length)return setError("Esta compra já possui recebimento e não pode ser editada sem alterar o estoque.");if(purchase.fulfillment_status==='cancelled')return setError("Uma compra cancelada não pode ser editada.");setError("");setPurchaseModal({purchase});}
-  async function deletePurchase(purchase:Purchase){if(!window.confirm(`Excluir a compra ${purchase.code}?\n\nA compra e a despesa correspondente serão apagadas permanentemente.`))return;try{setError("");await purchaseRequest(`/api/purchases/${purchase.id}?businessId=${businessId}`,{method:"DELETE"});setExpanded(null);await reload();}catch(actionError){setError(actionError instanceof Error?actionError.message:"Não foi possível excluir a compra.");}}
+  async function deletePurchase(purchase:Purchase){setError("");setDeletePurchaseTarget(purchase);}
+  async function confirmDeletePurchase(purchase:Purchase){await purchaseRequest(`/api/purchases/${purchase.id}?businessId=${businessId}&reverseStock=${purchase.receipts.length>0}`,{method:"DELETE"});setDeletePurchaseTarget(null);setExpanded(null);await Promise.all([reload(),onItemsChanged()]);}
 
   return <section className="purchase-page">
     <div className="module-hero"><div className="module-icon"><ShoppingBasket size={19} /></div><div><p>Compras e abastecimento</p><h2>Comprar melhor, receber com controle</h2><span>Pedidos, fornecedores, recebimentos, preços e reposição ligados ao estoque virtual.</span></div><button onClick={() => setPurchaseModal({})}>Nova compra</button></div>
@@ -137,6 +139,7 @@ export function PurchasesPage({ businessId, range, items, onItemsChanged }: { bu
     {supplierModal && <SupplierModal businessId={businessId} supplier={supplierModal === "new" ? null : supplierModal} items={items} linked={dashboard.supplier_items} onClose={() => setSupplierModal(null)} onSaved={async () => { setSupplierModal(null); await reload(); }} />}
     {purchaseModal && <PurchaseModal businessId={businessId} suppliers={dashboard.suppliers.filter((row) => row.is_active||row.id===purchaseModal.purchase?.supplier_id)} items={items} initial={purchaseModal.initial ?? []} purchase={purchaseModal.purchase} onClose={() => setPurchaseModal(null)} onSaved={async () => { setPurchaseModal(null); setSelectedRestock(new Set()); setTab("orders"); await reload(); }} />}
     {receivePurchase && <ReceiptModal businessId={businessId} purchase={receivePurchase} onClose={() => setReceivePurchase(null)} onSaved={async () => { setReceivePurchase(null); await reload(); }} />}
+    {deletePurchaseTarget && <DeletePurchaseModal purchase={deletePurchaseTarget} onClose={() => setDeletePurchaseTarget(null)} onConfirm={() => confirmDeletePurchase(deletePurchaseTarget)} />}
   </section>;
 }
 
@@ -218,6 +221,20 @@ function ReceiptModal({businessId,purchase,onClose,onSaved}:{businessId:string;p
   const pending=purchase.items.filter((item)=>item.received_quantity<item.quantity);const [quantities,setQuantities]=useState<Record<string,string>>({});const [receivedAt,setReceivedAt]=useState(new Date().toISOString().slice(0,16));const [notes,setNotes]=useState("");const [saving,setSaving]=useState(false);const [error,setError]=useState("");
   async function save(){const lines=pending.map((item)=>({purchase_item_id:Number(item.id),quantity:decimal(quantities[item.id]??"")})).filter((line)=>line.quantity>0);if(!lines.length)return setError("Informe a quantidade recebida de ao menos um item.");if(lines.some((line)=>line.quantity>Number(pending.find((item)=>Number(item.id)===line.purchase_item_id)!.quantity)-Number(pending.find((item)=>Number(item.id)===line.purchase_item_id)!.received_quantity)))return setError("Uma quantidade ultrapassa o saldo pendente.");setSaving(true);const {error:rpcError}=await supabase.rpc("receive_purchase_order",{p_business_id:Number(businessId),p_purchase_id:Number(purchase.id),p_received_at:new Date(receivedAt).toISOString(),p_notes:notes,p_items:lines});if(rpcError){setError(rpcError.message);setSaving(false);return;}await onSaved();}
   return <Modal title={`Receber ${purchase.code}`} subtitle="Confirme somente o que chegou fisicamente. Cada quantidade registrada entra no estoque e atualiza o histórico de custo." onClose={onClose}><div className="receipt-lines"><div className="receipt-line header"><span>Item</span><span>Pedido</span><span>Já recebido</span><span>Pendente</span><span>Receber agora</span></div>{pending.map((item)=><div className="receipt-line" key={item.id}><strong>{item.name}<small>{item.unit}</small></strong><span>{NUMBER.format(item.quantity)}</span><span>{NUMBER.format(item.received_quantity)}</span><span>{NUMBER.format(item.quantity-item.received_quantity)}</span><input type="number" min="0" max={item.quantity-item.received_quantity} step="0.0001" value={quantities[item.id]??""} onChange={(e)=>setQuantities({...quantities,[item.id]:e.target.value})}/></div>)}</div><div className="form-grid"><label><span>Data e hora do recebimento</span><input type="datetime-local" value={receivedAt} max={new Date().toISOString().slice(0,16)} onChange={(e)=>setReceivedAt(e.target.value)}/></label><label><span>Observação</span><input value={notes} onChange={(e)=>setNotes(e.target.value)} placeholder="Ex.: entrega parcial"/></label></div>{error&&<p className="form-error">{error}</p>}<ModalActions saving={saving} onClose={onClose} onSave={save} label="Confirmar recebimento" /></Modal>;
+}
+
+function DeletePurchaseModal({purchase,onClose,onConfirm}:{purchase:Purchase;onClose:()=>void;onConfirm:()=>Promise<void>}){
+  const [busy,setBusy]=useState(false);const [message,setMessage]=useState("");
+  const received=useMemo(()=>{const grouped=new Map<string,{itemId:string;name:string;quantity:number;unit:string}>();purchase.receipts.forEach(receipt=>receipt.items.forEach(item=>{const purchaseItem=purchase.items.find(row=>row.item_id===item.item_id);const current=grouped.get(item.item_id)??{itemId:item.item_id,name:item.name,quantity:0,unit:purchaseItem?.unit??"un"};current.quantity+=Number(item.quantity);grouped.set(item.item_id,current);}));return [...grouped.values()];},[purchase]);
+  async function remove(){setBusy(true);setMessage("");try{await onConfirm();}catch(error){setMessage(error instanceof Error?error.message:"Não foi possível excluir a compra.");setBusy(false);}}
+  const reversesStock=received.length>0;
+  return <Modal title={`Excluir ${purchase.code}`} subtitle={reversesStock?"Esta compra já foi recebida. Para excluí-la, o ERP precisa desfazer primeiro a entrada que ela gerou no estoque.":"A compra e a despesa correspondente serão apagadas permanentemente."} onClose={busy?()=>{}:onClose}>
+    {reversesStock&&<div className="purchase-delete-warning"><TriangleAlert size={20}/><div><strong>O estoque será reduzido</strong><span>Estas quantidades serão retiradas do saldo atual:</span></div></div>}
+    {reversesStock&&<div className="purchase-delete-items">{received.map(item=><div key={item.itemId}><span>{item.name}</span><strong>− {NUMBER.format(item.quantity)} {item.unit}</strong></div>)}</div>}
+    <p className="purchase-delete-note">{reversesStock?"Depois da reversão, os recebimentos, o histórico de custo desta compra, a despesa vinculada e a própria compra serão excluídos. As vendas e outras movimentações permanecerão intactas.":"Essa ação não poderá ser desfeita."}</p>
+    {message&&<p className="form-error">{message}</p>}
+    <div className="modal-actions"><button type="button" className="modal-secondary" onClick={onClose} disabled={busy}>Cancelar</button><button type="button" className="modal-danger" onClick={remove} disabled={busy}>{busy?"Excluindo...":reversesStock?"Voltar estoque e excluir":"Excluir compra"}</button></div>
+  </Modal>;
 }
 
 function Modal({title,subtitle,onClose,children}:{title:string;subtitle:string;onClose:()=>void;children:React.ReactNode}){useEscapeToClose(onClose);return <div className="modal-backdrop"><div className="modal-card purchase-modal" role="dialog" aria-modal="true" aria-labelledby="purchase-modal-title"><button className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19}/></button><p className="page-kicker">Compras e fornecedores</p><h2 id="purchase-modal-title">{title}</h2><p className="modal-description">{subtitle}</p>{children}</div></div>}
