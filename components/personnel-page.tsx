@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarClock, CheckCircle2, Clock3, MoreHorizontal, Pencil, Plus, Receipt, Search, Trash2, TriangleAlert, UserCheck, UserRound, UsersRound, UserX, X } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useEscapeToClose } from "@/lib/use-escape-close";
+import { usePersistedTab } from "@/lib/use-persisted-tab";
 
 type Range = { start: string; end: string };
 type Employee = { id: string; name: string; cpf: string | null; pix_key: string | null; default_hourly_rate: number | null; is_active: boolean; notes: string | null };
@@ -24,6 +25,7 @@ const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL
 const NUMBER = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const DATE = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
 const COST_TYPES: Record<string, string> = { monthly_salary: "Salário mensal", overtime: "Hora extra", charges: "Encargos", benefit: "Benefício", bonus: "Bonificação", additional: "Adicional", other: "Outro" };
+const PERSONNEL_TABS = ["overview", "team", "work"] as const;
 
 function isoToday() { return new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" }); }
 function dateLabel(value: string | null) { return value ? DATE.format(new Date(`${value.slice(0, 10)}T00:00:00Z`)) : "—"; }
@@ -34,7 +36,7 @@ export function PersonnelPage({ businessId, userId, range, onExpensesChanged }: 
   const [data, setData] = useState<Dashboard>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"overview" | "team" | "work">("overview");
+  const [tab, setTab] = usePersistedTab<"overview" | "team" | "work">("dopamina:personnel-tab", "overview", PERSONNEL_TABS);
   const [modal, setModal] = useState<"employee" | "shift" | "week" | "cost" | "closing" | null>(null);
   const [query, setQuery] = useState("");
 

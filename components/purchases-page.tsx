@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useEscapeToClose } from "@/lib/use-escape-close";
+import { usePersistedTab } from "@/lib/use-persisted-tab";
 
 type Range = { start: string; end: string };
 type Item = { id: string; name: string; sku: string | null; item_type: string; purchase_unit?: string | null; purchase_pack_quantity?: number | null; consumption_unit: string; areas: { id: string; name: string } | { id: string; name: string }[] | null };
@@ -26,6 +27,7 @@ const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL
 const NUMBER = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const DATE = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
 const STATUS_LABEL: Record<Purchase["fulfillment_status"], string> = { ordered: "Pedido", awaiting: "Aguardando", partially_received: "Parcial", received: "Recebido", cancelled: "Cancelado" };
+const PURCHASE_TABS = ["overview", "orders", "suppliers", "replenishment", "prices"] as const;
 
 function one<T>(value: T | T[] | null): T | null { return Array.isArray(value) ? value[0] ?? null : value; }
 function dateLabel(value: string | null) { return value ? DATE.format(new Date(`${value.slice(0, 10)}T00:00:00Z`)) : "—"; }
@@ -36,7 +38,7 @@ export function PurchasesPage({ businessId, range, items, onItemsChanged }: { bu
   const [dashboard, setDashboard] = useState<Dashboard>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState<"overview" | "orders" | "suppliers" | "replenishment" | "prices">("overview");
+  const [tab, setTab] = usePersistedTab<"overview" | "orders" | "suppliers" | "replenishment" | "prices">("dopamina:purchases-tab", "overview", PURCHASE_TABS);
   const [supplierModal, setSupplierModal] = useState<Supplier | "new" | null>(null);
   const [purchaseModal, setPurchaseModal] = useState<{ initial?: Replenishment[]; purchase?: Purchase } | null>(null);
   const [receivePurchase, setReceivePurchase] = useState<Purchase | null>(null);

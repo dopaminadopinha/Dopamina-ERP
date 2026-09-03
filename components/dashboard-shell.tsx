@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useEscapeToClose } from "@/lib/use-escape-close";
+import { usePersistedTab } from "@/lib/use-persisted-tab";
 import { PurchasesPage } from "@/components/purchases-page";
 import { PersonnelPage } from "@/components/personnel-page";
 import { StructuralCostsSection } from "@/components/structural-costs-section";
@@ -88,6 +89,9 @@ const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: "cadastros", label: "Cadastros", icon: <ClipboardList size={19} /> },
   { id: "configuracoes", label: "Configurações", icon: <Settings size={19} /> },
 ];
+const SECTION_TABS = NAV_ITEMS.map((item) => item.id);
+const STOCK_TABS = ["stock", "movements", "inventories"] as const;
+const CATALOG_TABS = ["products", "ingredients", "areas"] as const;
 
 function nested<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
 function dateLabel(value: string | null) { return value ? DATE.format(new Date(`${value}T00:00:00Z`)) : "—"; }
@@ -161,7 +165,7 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
 
 export function DashboardShell() {
   const router = useRouter();
-  const [section, setSection] = useState<Section>("visao-geral");
+  const [section, setSection] = usePersistedTab<Section>("dopamina:section", "visao-geral", SECTION_TABS);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCompact, setSidebarCompact] = useState(() => typeof window !== "undefined" && localStorage.getItem("dopamina-sidebar-compact") === "1");
   useEffect(() => { localStorage.setItem("dopamina-sidebar-compact", sidebarCompact ? "1" : "0"); }, [sidebarCompact]);
@@ -1053,7 +1057,7 @@ const STOCK_STATUS_LABELS: Record<StockStatus, string> = { normal: "Normal", low
 const STOCK_REASON_LABELS: Record<string, string> = { purchase: "Compra / entrada", other_in: "Outra entrada", sale: "Venda Zig", recipe_consumption: "Consumo por ficha", inventory_correction: "Correção de inventário", breakage: "Quebra", waste: "Desperdício", expiration: "Vencimento", courtesy: "Cortesia", internal_consumption: "Consumo interno", operational_error: "Erro operacional", loss: "Perda", other_out: "Outra saída" };
 
 function StockPage(props: Parameters<typeof SectionContent>[0]) {
-  const [tab, setTab] = useState<"stock" | "movements" | "inventories">("stock");
+  const [tab, setTab] = usePersistedTab<"stock" | "movements" | "inventories">("dopamina:stock-tab", "stock", STOCK_TABS);
   const [query, setQuery] = useState("");
   const [sector, setSector] = useState("all");
   const [category, setCategory] = useState("all");
@@ -1141,7 +1145,7 @@ function CatalogPage(props: Parameters<typeof SectionContent>[0]) {
   const [editing, setEditing] = useState<CatalogItem | null>(null);
   const [editingIngredient, setEditingIngredient] = useState<CatalogItem | "new" | null>(null);
   const [query, setQuery] = useState("");
-  const [view, setView] = useState<"products" | "ingredients" | "areas">("products");
+  const [view, setView] = usePersistedTab<"products" | "ingredients" | "areas">("dopamina:catalog-tab", "products", CATALOG_TABS);
   const [statusFilter, setStatusFilter] = useState<"all" | "ready" | "cost" | "recipe">("all");
   const [sectorFilter, setSectorFilter] = useState<"all" | "unassigned" | string>("all");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
