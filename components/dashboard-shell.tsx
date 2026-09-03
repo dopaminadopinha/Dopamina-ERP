@@ -34,6 +34,8 @@ type PaymentMethod = { id: string; import_id: string; payment_method: string; am
 type Expense = { id: string; purchase_id: string | null; source_type: string | null; source_id: string | null; recurrence_end: string | null; area_id: string | null; category: string; description: string; expense_date: string; due_date: string | null; paid_at: string | null; amount: number; payment_method: string | null; status: "draft" | "pending" | "completed" | "cancelled"; is_recurring: boolean; cost_behavior: "fixed" | "variable"; areas: { name: string; is_operational: boolean } | { name: string; is_operational: boolean }[] | null };
 type ImportRow = { id: string; file_name: string; period_start: string | null; period_end: string | null; row_count: number; status: string; created_at: string };
 type Area = { id: string; name: string; is_operational: boolean };
+type FeeCategory = "tax" | "card_fee" | "platform_fee" | "other";
+type BusinessFeeRate = { id: string; name: string; category: FeeCategory; percentage: number; effective_from: string; effective_to: string | null; is_active: boolean; notes: string | null; created_at: string };
 type CatalogItem = { id: string; area_id: string | null; name: string; sku: string | null; item_type: "ingredient" | "product" | "consumable"; purchase_unit: string | null; purchase_pack_quantity: number | null; consumption_unit: string; costing_method: "simple" | "recipe"; sale_price: number | null; latest_unit_cost: number | null; average_unit_cost: number | null; minimum_stock: number; is_active: boolean; zig_product_id: string | null; categories: { name: string } | { name: string }[] | null; areas: { id: string; name: string; is_operational: boolean } | { id: string; name: string; is_operational: boolean }[] | null };
 type CostHistory = { id: string; item_id: string; unit_cost: number; effective_from: string; source: "manual" | "recipe" | "import" | "purchase"; created_at: string };
 type Recipe = { id: string; product_id: string; yield_quantity: number; notes: string | null; effective_from: string; created_at: string };
@@ -64,12 +66,12 @@ type StockMovement = { movement_key: string; occurred_at: string; item_id: strin
 type StockInventory = { id: string; counted_at: string; notes: string | null; item_count: number; variance_value: number; divergent_items: number };
 type StockDashboard = { period_start: string; period_end: string; summary: { stock_value: number; below_minimum: number; out_of_stock: number; divergent_items: number; variance_value: number; loss_value: number; replenishment_items: number; last_inventory_at: string | null; insufficient_items: number }; items: StockItem[]; movements: StockMovement[]; inventories: StockInventory[]; missing_recipes: { item_id: string; name: string; quantity: number }[] };
 type DateRange = { start: string; end: string };
-type DataState = { sales: Sale[]; saleItems: SaleItem[]; payments: PaymentMethod[]; expenses: Expense[]; forecasts: Forecast[]; catalogItems: CatalogItem[]; ingredients: CatalogItem[]; costHistory: CostHistory[]; recipes: Recipe[]; recipeItems: RecipeItem[]; imports: ImportRow[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; abcImports: AbcImport[]; abcItems: AbcItem[]; zig: ZigDashboard; previousZig: ZigDashboard; sectorProfitability: SectorProfitability; previousSectorProfitability: SectorProfitability; stock: StockDashboard; products: number; suppliers: number; areas: Area[] };
+type DataState = { sales: Sale[]; saleItems: SaleItem[]; payments: PaymentMethod[]; expenses: Expense[]; feeRates: BusinessFeeRate[]; forecasts: Forecast[]; catalogItems: CatalogItem[]; ingredients: CatalogItem[]; costHistory: CostHistory[]; recipes: Recipe[]; recipeItems: RecipeItem[]; imports: ImportRow[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; abcImports: AbcImport[]; abcItems: AbcItem[]; zig: ZigDashboard; previousZig: ZigDashboard; sectorProfitability: SectorProfitability; previousSectorProfitability: SectorProfitability; stock: StockDashboard; products: number; suppliers: number; areas: Area[] };
 
 const EMPTY_ZIG: ZigDashboard = { period_start: "", period_end: "", summary: { gross_cents: 0, discount_cents: 0, net_cents: 0, revenue_cents: 0, quantity: 0, transaction_count: 0, refunded_item_count: 0 }, products: [], payments: [], daily: [], sync: [] };
 const EMPTY_SECTOR_PROFITABILITY: SectorProfitability = { period_start: "", period_end: "", products: [] };
 const EMPTY_STOCK: StockDashboard = { period_start: "", period_end: "", summary: { stock_value: 0, below_minimum: 0, out_of_stock: 0, divergent_items: 0, variance_value: 0, loss_value: 0, replenishment_items: 0, last_inventory_at: null, insufficient_items: 0 }, items: [], movements: [], inventories: [], missing_recipes: [] };
-const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses: [], forecasts: [], catalogItems: [], ingredients: [], costHistory: [], recipes: [], recipeItems: [], imports: [], profitabilityImports: [], profitabilityItems: [], abcImports: [], abcItems: [], zig: EMPTY_ZIG, previousZig: EMPTY_ZIG, sectorProfitability: EMPTY_SECTOR_PROFITABILITY, previousSectorProfitability: EMPTY_SECTOR_PROFITABILITY, stock: EMPTY_STOCK, products: 0, suppliers: 0, areas: [] };
+const EMPTY_DATA: DataState = { sales: [], saleItems: [], payments: [], expenses: [], feeRates: [], forecasts: [], catalogItems: [], ingredients: [], costHistory: [], recipes: [], recipeItems: [], imports: [], profitabilityImports: [], profitabilityItems: [], abcImports: [], abcItems: [], zig: EMPTY_ZIG, previousZig: EMPTY_ZIG, sectorProfitability: EMPTY_SECTOR_PROFITABILITY, previousSectorProfitability: EMPTY_SECTOR_PROFITABILITY, stock: EMPTY_STOCK, products: 0, suppliers: 0, areas: [] };
 const MONEY = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 const NUMBER = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const DATE = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
@@ -124,9 +126,10 @@ function automaticCmvRows(zig: ZigDashboard, catalogItems: CatalogItem[]): Autom
 
 async function fetchData(businessId: string, range: DateRange): Promise<DataState> {
   const previousRange = previousEquivalentRange(range);
-  const [sales, expenses, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig, previousZig, sectorProfitability, previousSectorProfitability, costHistory, recipes] = await Promise.all([
+  const [sales, expenses, feeRates, products, suppliers, areas, forecasts, imports, profitabilityImports, abcImports, zig, previousZig, sectorProfitability, previousSectorProfitability, costHistory, recipes] = await Promise.all([
     supabase.from("sales").select("id,import_id,period_start,period_end,business_date,gross_amount,discount_amount,product_gross_amount,service_amount,revenue_amount,closing_net_amount,open_accounts_amount,recharge_balance_amount,sales_imports(file_name,row_count,created_at)").eq("business_id", businessId).order("business_date", { ascending: false }),
     supabase.from("expenses").select("id,purchase_id,source_type,source_id,recurrence_end,area_id,category,description,expense_date,due_date,paid_at,amount,payment_method,status,is_recurring,cost_behavior,areas(name,is_operational)").eq("business_id", businessId).neq("status", "cancelled").order("expense_date", { ascending: false }),
+    supabase.from("business_fee_rates").select("id,name,category,percentage,effective_from,effective_to,is_active,notes,created_at").eq("business_id", businessId).order("effective_from", { ascending: false }),
     supabase.from("items").select("id,area_id,name,sku,item_type,purchase_unit,purchase_pack_quantity,consumption_unit,costing_method,sale_price,latest_unit_cost,average_unit_cost,minimum_stock,is_active,zig_product_id,categories(name),areas(id,name,is_operational)").eq("business_id", businessId).order("name"),
     supabase.from("suppliers").select("id", { count: "exact", head: true }).eq("business_id", businessId),
     supabase.from("areas").select("id,name,is_operational").eq("business_id", businessId).eq("is_active", true).order("sort_order"),
@@ -141,7 +144,7 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
     supabase.from("item_cost_history").select("id,item_id,unit_cost,effective_from,source,created_at").eq("business_id", businessId).order("effective_from", { ascending: false }),
     supabase.from("recipes").select("id,product_id,yield_quantity,notes,effective_from,created_at").eq("business_id", businessId).order("effective_from", { ascending: false }),
   ]);
-  const firstError = [sales.error, expenses.error, products.error, suppliers.error, areas.error, forecasts.error, imports.error, profitabilityImports.error, abcImports.error, zig.error, previousZig.error, sectorProfitability.error, previousSectorProfitability.error, costHistory.error, recipes.error].find(Boolean);
+  const firstError = [sales.error, expenses.error, feeRates.error, products.error, suppliers.error, areas.error, forecasts.error, imports.error, profitabilityImports.error, abcImports.error, zig.error, previousZig.error, sectorProfitability.error, previousSectorProfitability.error, costHistory.error, recipes.error].find(Boolean);
   if (firstError) throw firstError;
   const saleIds = (sales.data ?? []).map((sale) => sale.id);
   const importIds = (sales.data ?? []).map((sale) => sale.import_id).filter(Boolean) as string[];
@@ -160,7 +163,7 @@ async function fetchData(businessId: string, range: DateRange): Promise<DataStat
   const allItems = (products.data ?? []) as unknown as CatalogItem[];
   const catalogItems = allItems.filter((item) => item.item_type === "product");
   const ingredients = allItems.filter((item) => item.item_type !== "product");
-  return { sales: (sales.data ?? []) as unknown as Sale[], saleItems: (items.data ?? []) as unknown as SaleItem[], payments: (payments.data ?? []) as PaymentMethod[], expenses: (expenses.data ?? []) as Expense[], forecasts: (forecasts.data ?? []) as unknown as Forecast[], catalogItems, ingredients, costHistory: (costHistory.data ?? []) as CostHistory[], recipes: (recipes.data ?? []) as Recipe[], recipeItems: (recipeItems.data ?? []) as RecipeItem[], imports: (imports.data ?? []) as ImportRow[], profitabilityImports: (profitabilityImports.data ?? []) as ProfitabilityImport[], profitabilityItems: (profitabilityItems.data ?? []) as ProfitabilityItem[], abcImports: (abcImports.data ?? []) as AbcImport[], abcItems: (abcItems.data ?? []) as AbcItem[], zig: (zig.data as ZigDashboard | null) ?? EMPTY_ZIG, previousZig: (previousZig.data as ZigDashboard | null) ?? EMPTY_ZIG, sectorProfitability: (sectorProfitability.data as SectorProfitability | null) ?? EMPTY_SECTOR_PROFITABILITY, previousSectorProfitability: (previousSectorProfitability.data as SectorProfitability | null) ?? EMPTY_SECTOR_PROFITABILITY, stock: EMPTY_STOCK, products: catalogItems.length, suppliers: suppliers.count ?? 0, areas: (areas.data ?? []) as Area[] };
+  return { sales: (sales.data ?? []) as unknown as Sale[], saleItems: (items.data ?? []) as unknown as SaleItem[], payments: (payments.data ?? []) as PaymentMethod[], expenses: (expenses.data ?? []) as Expense[], feeRates: (feeRates.data ?? []) as BusinessFeeRate[], forecasts: (forecasts.data ?? []) as unknown as Forecast[], catalogItems, ingredients, costHistory: (costHistory.data ?? []) as CostHistory[], recipes: (recipes.data ?? []) as Recipe[], recipeItems: (recipeItems.data ?? []) as RecipeItem[], imports: (imports.data ?? []) as ImportRow[], profitabilityImports: (profitabilityImports.data ?? []) as ProfitabilityImport[], profitabilityItems: (profitabilityItems.data ?? []) as ProfitabilityItem[], abcImports: (abcImports.data ?? []) as AbcImport[], abcItems: (abcItems.data ?? []) as AbcItem[], zig: (zig.data as ZigDashboard | null) ?? EMPTY_ZIG, previousZig: (previousZig.data as ZigDashboard | null) ?? EMPTY_ZIG, sectorProfitability: (sectorProfitability.data as SectorProfitability | null) ?? EMPTY_SECTOR_PROFITABILITY, previousSectorProfitability: (previousSectorProfitability.data as SectorProfitability | null) ?? EMPTY_SECTOR_PROFITABILITY, stock: EMPTY_STOCK, products: catalogItems.length, suppliers: suppliers.count ?? 0, areas: (areas.data ?? []) as Area[] };
 }
 
 export function DashboardShell() {
@@ -289,11 +292,8 @@ function SectionContent(props: { section: Section; setSection: (section: Section
   if (props.section === "planejamento") return <PlanningPage {...props} />;
   if (props.section === "cadastros") return <CatalogPage {...props} />;
   if (props.section === "importacoes") return <ImportsPage {...props} />;
-  const content: Record<Exclude<Section, "visao-geral" | "dre" | "insights" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" | "planejamento" | "cadastros" | "importacoes">, { eyebrow: string; title: string; description: string; action: string; icon: React.ReactNode; columns: string[] }> = {
-    configuracoes: { eyebrow: "Administração", title: "Configurações e acessos", description: "Gerencie usuários, dados do negócio e histórico de alterações.", action: "Convidar usuário", icon: <UsersRound size={19} />, columns: ["Usuário", "E-mail", "Perfil", "Status", "Último acesso"] },
-  };
-  const current = content[props.section];
-  return <section className="module-page"><ModuleHero {...current} /><div className="data-table-card"><div className="data-table-head">{current.columns.map((column) => <span key={column}>{column}</span>)}</div><div className="empty-table"><div>{current.icon}</div><h3>Este módulo será a próxima etapa</h3><p>Vendas e despesas já usam a base central. Agora podemos conectar este módulo aos mesmos dados.</p></div></div></section>;
+  if (props.section === "configuracoes") return <FeeRatesSettings {...props} />;
+  return null;
 }
 
 function ModuleHero({ eyebrow, title, description, action, icon, onAction }: { eyebrow: string; title: string; description: string; action?: string; icon: React.ReactNode; onAction?: () => void }) {
@@ -374,9 +374,30 @@ type DreSummary = {
   cmv: number; cmvMissingRevenue: number; cmvCoverage: number; grossProfit: number;
   pessoal: number; pessoalCategories: { category: string; amount: number }[];
   opex: number; opexCategories: { category: string; amount: number }[];
+  feesAndTaxes: number; feeBreakdown: { category: FeeCategory; name: string; percentage: number; amount: number }[];
   operatingResult: number;
 };
-function computeDreSummary(zig: ZigDashboard, catalogItems: CatalogItem[], allExpenses: Expense[], range: DateRange, apiHasData: boolean, allSales: Sale[]): DreSummary {
+function feeRateAppliesOn(rate: BusinessFeeRate, date: string) { return rate.is_active && rate.effective_from <= date && (!rate.effective_to || rate.effective_to >= date); }
+function computeFeeBreakdown(netRevenue: number, rates: BusinessFeeRate[], range: DateRange, zig: ZigDashboard, apiHasData: boolean, sales: Sale[]) {
+  const dates = datesInRange(range);
+  const rawRevenueByDay = new Map<string, number>();
+  if (apiHasData) zig.daily.forEach((row) => rawRevenueByDay.set(row.operational_date, Number(row.net_cents) / 100));
+  else salesInRange(sales, range).forEach((sale) => rawRevenueByDay.set(sale.business_date, (rawRevenueByDay.get(sale.business_date) ?? 0) + Number(sale.revenue_amount ?? sale.closing_net_amount ?? sale.gross_amount)));
+  const mappedRevenue = dates.reduce((sum, date) => sum + (rawRevenueByDay.get(date) ?? 0), 0);
+  const grouped = new Map<string, { category: FeeCategory; name: string; amount: number }>();
+  rates.filter((rate) => rate.is_active && rate.effective_from <= range.end && (!rate.effective_to || rate.effective_to >= range.start)).forEach((rate) => {
+    const effectiveDates = dates.filter((date) => feeRateAppliesOn(rate, date));
+    const revenueBase = mappedRevenue > 0
+      ? effectiveDates.reduce((sum, date) => sum + (rawRevenueByDay.get(date) ?? 0), 0) / mappedRevenue * netRevenue
+      : effectiveDates.length / dates.length * netRevenue;
+    const key = `${rate.category}:${rate.name.trim().toLocaleLowerCase("pt-BR")}`;
+    const current = grouped.get(key) ?? { category: rate.category, name: rate.name, amount: 0 };
+    current.amount += revenueBase * Number(rate.percentage);
+    grouped.set(key, current);
+  });
+  return [...grouped.values()].map((row) => ({ ...row, percentage: netRevenue > 0 ? row.amount / netRevenue : 0 })).sort((a, b) => b.amount - a.amount);
+}
+function computeDreSummary(zig: ZigDashboard, catalogItems: CatalogItem[], allExpenses: Expense[], feeRates: BusinessFeeRate[], range: DateRange, apiHasData: boolean, allSales: Sale[]): DreSummary {
   const salesInPeriod = salesInRange(allSales, range);
   const grossRevenue = apiHasData ? Number(zig.summary.gross_cents) / 100 : salesInPeriod.reduce((sum, row) => sum + Number(row.gross_amount), 0);
   const discounts = apiHasData ? Number(zig.summary.discount_cents) / 100 : salesInPeriod.reduce((sum, row) => sum + Number(row.discount_amount), 0);
@@ -394,7 +415,9 @@ function computeDreSummary(zig: ZigDashboard, catalogItems: CatalogItem[], allEx
   const opexBreakdown = operationalCostBreakdown(opexExpenses, range);
   const pessoal = pessoalBreakdown.days.reduce((sum, row) => sum + row.operational, 0);
   const opex = opexBreakdown.days.reduce((sum, row) => sum + row.operational, 0);
-  return { grossRevenue, discounts, netRevenue, cmvRevenue, cmvKnownRevenue, cmv, cmvMissingRevenue, cmvCoverage, grossProfit, pessoal, pessoalCategories: pessoalBreakdown.categories, opex, opexCategories: opexBreakdown.categories, operatingResult: grossProfit - pessoal - opex };
+  const feeBreakdown = computeFeeBreakdown(netRevenue, feeRates, range, zig, apiHasData, allSales);
+  const feesAndTaxes = feeBreakdown.reduce((sum, row) => sum + row.amount, 0);
+  return { grossRevenue, discounts, netRevenue, cmvRevenue, cmvKnownRevenue, cmv, cmvMissingRevenue, cmvCoverage, grossProfit, pessoal, pessoalCategories: pessoalBreakdown.categories, opex, opexCategories: opexBreakdown.categories, feesAndTaxes, feeBreakdown, operatingResult: grossProfit - pessoal - opex - feesAndTaxes };
 }
 function pctChange(current: number | null, previous: number | null) { if (current === null || previous === null || previous === 0) return null; return (current - previous) / Math.abs(previous); }
 
@@ -423,8 +446,8 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
   const range = props.range;
   const previousRange = previousEquivalentRange(range);
   const apiHasData = props.data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
-  const current = useMemo(() => computeDreSummary(props.data.zig, props.data.catalogItems, props.data.expenses, range, apiHasData, props.data.sales), [props.data.zig, props.data.catalogItems, props.data.expenses, range, apiHasData, props.data.sales]);
-  const previous = useMemo(() => computeDreSummary(props.data.previousZig, props.data.catalogItems, props.data.expenses, previousRange, apiHasData, props.data.sales), [props.data.previousZig, props.data.catalogItems, props.data.expenses, previousRange, apiHasData, props.data.sales]);
+  const current = useMemo(() => computeDreSummary(props.data.zig, props.data.catalogItems, props.data.expenses, props.data.feeRates, range, apiHasData, props.data.sales), [props.data.zig, props.data.catalogItems, props.data.expenses, props.data.feeRates, range, apiHasData, props.data.sales]);
+  const previous = useMemo(() => computeDreSummary(props.data.previousZig, props.data.catalogItems, props.data.expenses, props.data.feeRates, previousRange, apiHasData, props.data.sales), [props.data.previousZig, props.data.catalogItems, props.data.expenses, props.data.feeRates, previousRange, apiHasData, props.data.sales]);
 
   const grossMargin = current.netRevenue > 0 ? current.grossProfit / current.netRevenue : null;
   const previousGrossMargin = previous.netRevenue > 0 ? previous.grossProfit / previous.netRevenue : null;
@@ -434,6 +457,7 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
   const previousCmvPct = previous.netRevenue > 0 ? previous.cmv / previous.netRevenue : null;
   const pessoalPct = current.netRevenue > 0 ? current.pessoal / current.netRevenue : null;
   const opexPct = current.netRevenue > 0 ? current.opex / current.netRevenue : null;
+  const feesPct = current.netRevenue > 0 ? current.feesAndTaxes / current.netRevenue : null;
 
   const revenueChange = pctChange(current.netRevenue, previous.netRevenue);
   const resultChange = pctChange(current.operatingResult, previous.operatingResult);
@@ -446,7 +470,7 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
   const generalPessoal = generalExpenses.filter((expense) => expense.source_type === "work_shift" || expense.source_type === "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
   const generalOpex = generalExpenses.filter((expense) => expense.source_type !== "work_shift" && expense.source_type !== "personnel_cost").reduce((sum, expense) => sum + operationalExpenseAmount(expense, range), 0);
   const generalTotal = generalPessoal + generalOpex;
-  const finalResult = sectorTotal - generalTotal;
+  const finalResult = sectorTotal - generalTotal - current.feesAndTaxes;
 
   const dailyRevenue = new Map<string, number>();
   if (apiHasData) props.data.zig.daily.forEach((row) => dailyRevenue.set(row.operational_date, Number(row.net_cents) / 100));
@@ -455,12 +479,13 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
   const opexByDay = new Map(operationalCostBreakdown(props.data.expenses.filter((expense) => !expense.purchase_id && expense.source_type !== "work_shift" && expense.source_type !== "personnel_cost"), range).days.map((row) => [row.date, row.operational]));
   const dailyTrend: FinancialDay[] = datesInRange(range).map((date) => {
     const revenue = dailyRevenue.get(date) ?? 0;
-    const expenses = (pessoalByDay.get(date) ?? 0) + (opexByDay.get(date) ?? 0);
+    const dailyFees = revenue * props.data.feeRates.filter((rate) => feeRateAppliesOn(rate, date)).reduce((sum, rate) => sum + Number(rate.percentage), 0);
+    const expenses = (pessoalByDay.get(date) ?? 0) + (opexByDay.get(date) ?? 0) + dailyFees;
     return { date, revenue, expenses, result: revenue - expenses };
   });
 
   const alerts: { label: string; detail: string; tone: "red" | "yellow" }[] = [];
-  if (current.operatingResult < 0) alerts.push({ label: "Resultado operacional negativo", detail: `O período fechou em ${MONEY.format(current.operatingResult)} depois de CMV, pessoal e despesas operacionais.`, tone: "red" });
+  if (current.operatingResult < 0) alerts.push({ label: "Resultado operacional negativo", detail: `O período fechou em ${MONEY.format(current.operatingResult)} depois de CMV, pessoal, despesas, impostos e taxas.`, tone: "red" });
   if (cmvPct !== null && previousCmvPct !== null && cmvPct - previousCmvPct > 0.02) alerts.push({ label: "CMV aumentou em relação ao período anterior", detail: `Foi de ${NUMBER.format(previousCmvPct * 100)}% para ${NUMBER.format(cmvPct * 100)}% da receita líquida.`, tone: "yellow" });
   if (pessoalChange !== null && revenueChange !== null && pessoalChange > revenueChange + 0.02) alerts.push({ label: "Custo de pessoal cresceu mais que o faturamento", detail: `Pessoal ${pessoalChange >= 0 ? "subiu" : "caiu"} ${NUMBER.format(Math.abs(pessoalChange) * 100)}% contra ${NUMBER.format(Math.abs(revenueChange) * 100)}% do faturamento.`, tone: "yellow" });
   if (operatingMargin !== null && previousOperatingMargin !== null && operatingMargin < previousOperatingMargin - 0.01) alerts.push({ label: "Margem operacional caiu", detail: `Foi de ${NUMBER.format(previousOperatingMargin * 100)}% para ${NUMBER.format(operatingMargin * 100)}% da receita líquida.`, tone: "yellow" });
@@ -482,7 +507,7 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
       <ExecutiveMetric label="CMV" value={MONEY.format(current.cmv)} current={current.cmv} previous={previous.cmv} lowerIsBetter icon={<BarChart3 size={20} />} tone="yellow" note={`${NUMBER.format(current.cmvCoverage * 100)}% da receita com custo conhecido`} />
       <ExecutiveMetric label="Custo de pessoal" value={MONEY.format(current.pessoal)} current={current.pessoal} previous={previous.pessoal} lowerIsBetter icon={<UsersRound size={20} />} tone="red" note={pessoalPct === null ? "Sem receita no período" : `${NUMBER.format(pessoalPct * 100)}% da receita líquida`} />
       <ExecutiveMetric label="Despesas operacionais" value={MONEY.format(current.opex)} current={current.opex} previous={previous.opex} lowerIsBetter icon={<WalletCards size={20} />} tone="red" note={opexPct === null ? "Sem receita no período" : `${NUMBER.format(opexPct * 100)}% da receita líquida`} />
-      <ExecutiveMetric label="Resultado operacional" value={MONEY.format(current.operatingResult)} current={current.operatingResult} previous={previous.operatingResult} icon={current.operatingResult >= 0 ? <ArrowUpRight size={20} /> : <ArrowDownRight size={20} />} tone="purple" note="Lucro bruto − pessoal − despesas" />
+      <ExecutiveMetric label="Resultado operacional" value={MONEY.format(current.operatingResult)} current={current.operatingResult} previous={previous.operatingResult} icon={current.operatingResult >= 0 ? <ArrowUpRight size={20} /> : <ArrowDownRight size={20} />} tone="purple" note="Lucro bruto − pessoal − despesas − taxas" />
       <ExecutiveMetric label="Margem operacional" value={operatingMargin === null ? "—" : `${NUMBER.format(operatingMargin * 100)}%`} current={operatingMargin} previous={previousOperatingMargin} isRatio icon={<FileBarChart2 size={20} />} tone="purple" note="Resultado operacional / receita líquida" />
     </div>
 
@@ -498,6 +523,7 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
           <DreLine label="= Lucro bruto" value={current.grossProfit} strong percent={grossMargin} />
           <DreLine label="(-) Custos de pessoal" value={-current.pessoal} muted percent={pessoalPct} />
           <DreLine label="(-) Despesas operacionais" value={-current.opex} muted percent={opexPct} />
+          <DreLine label="(-) Impostos e taxas" value={-current.feesAndTaxes} muted percent={feesPct} />
           <DreLine label="= Resultado operacional" value={current.operatingResult} strong final percent={operatingMargin} />
         </div>
       </article>
@@ -505,10 +531,11 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
     </div>
 
     <div className="dre-layout">
-      <article className="chart-card finance-chart-card"><div className="card-title-row"><div><p>Evolução diária</p><h3>Faturamento, despesas e resultado</h3></div><span>{periodLabel}</span></div><FinancialTrendChart rows={dailyTrend} /><p className="dre-chart-note">Despesas somam pessoal e operacionais rateadas por dia; o CMV entra apenas no total do período, pois não há custo diário confiável por produto.</p></article>
+      <article className="chart-card finance-chart-card"><div className="card-title-row"><div><p>Evolução diária</p><h3>Faturamento, despesas e resultado</h3></div><span>{periodLabel}</span></div><FinancialTrendChart rows={dailyTrend} /><p className="dre-chart-note">Despesas somam pessoal, custos operacionais e taxas vigentes em cada dia; o CMV entra apenas no total do período, pois não há custo diário confiável por produto.</p></article>
       <article className="chart-card"><div className="card-title-row"><div><p>Comparação</p><h3>{periodLabel} vs. {previousLabel}</h3></div></div>
         <div className="dre-compare-grid">
           <DreCompareRow label="Receita líquida" current={current.netRevenue} previous={previous.netRevenue} money />
+          <DreCompareRow label="Impostos e taxas" current={current.feesAndTaxes} previous={previous.feesAndTaxes} money />
           <DreCompareRow label="Resultado operacional" current={current.operatingResult} previous={previous.operatingResult} money />
           <DreCompareRow label="Margem operacional" current={operatingMargin} previous={previousOperatingMargin} />
         </div>
@@ -517,10 +544,12 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
 
     <div className="dre-layout">
       <article className="chart-card"><div className="card-title-row"><div><p>Composição</p><h3>O que mais consome a receita</h3></div></div>
-        <div className="expense-classification dre-composition"><ExpenseCompositionRow label="CMV" value={current.cmv} total={current.netRevenue} /><ExpenseCompositionRow label="Pessoal" value={current.pessoal} total={current.netRevenue} /><ExpenseCompositionRow label="Despesas operacionais" value={current.opex} total={current.netRevenue} /><ExpenseCompositionRow label="Resultado operacional" value={Math.max(0, current.operatingResult)} total={current.netRevenue} /></div>
+        <div className="expense-classification dre-composition"><ExpenseCompositionRow label="CMV" value={current.cmv} total={current.netRevenue} /><ExpenseCompositionRow label="Pessoal" value={current.pessoal} total={current.netRevenue} /><ExpenseCompositionRow label="Despesas operacionais" value={current.opex} total={current.netRevenue} /><ExpenseCompositionRow label="Impostos e taxas" value={current.feesAndTaxes} total={current.netRevenue} /><ExpenseCompositionRow label="Resultado operacional" value={Math.max(0, current.operatingResult)} total={current.netRevenue} /></div>
       </article>
       <article className="chart-card"><div className="card-title-row"><div><p>Detalhamento</p><h3>Despesas operacionais por categoria</h3></div></div><ExpenseCategoryBars rows={current.opexCategories} total={current.opex} /></article>
     </div>
+
+    <article className="chart-card dre-fees-card"><div className="card-title-row"><div><p>Impostos e taxas</p><h3>Percentuais aplicados sobre a receita líquida</h3></div><strong>{MONEY.format(current.feesAndTaxes)}</strong></div><FeeBreakdown rows={current.feeBreakdown} /></article>
 
     <article className="chart-card dre-sector-card">
       <div className="card-title-row"><div><p>Resultado por setor</p><h3>{operationalAreas.length ? operationalAreas.map((area) => area.name).join(", ") : "Nenhum setor operacional"}</h3></div><span>Custos gerais não são rateados entre setores</span></div>
@@ -530,6 +559,7 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
       <div className="dre-sector-summary">
         <div><span>Resultado dos setores antes dos custos gerais</span><strong>{MONEY.format(sectorTotal)}</strong></div>
         <div><span>Custos gerais (terreno, banheiros, geral)</span><strong>{generalTotal > 0 ? `- ${MONEY.format(generalTotal)}` : "—"}</strong></div>
+        <div><span>Impostos e taxas sobre o faturamento</span><strong>{current.feesAndTaxes > 0 ? `- ${MONEY.format(current.feesAndTaxes)}` : "—"}</strong></div>
         <div className="final"><span>Resultado final do negócio</span><strong className={finalResult < 0 ? "negative" : ""}>{MONEY.format(finalResult)}</strong></div>
       </div>
     </article>
@@ -541,6 +571,10 @@ function DrePage(props: Parameters<typeof SectionContent>[0]) {
 }
 function DreLine({ label, value, muted, strong, final, percent }: { label: string; value: number; muted?: boolean; strong?: boolean; final?: boolean; percent?: number | null }) {
   return <div className={`dre-line ${strong ? "strong" : ""} ${final ? "final" : ""} ${muted ? "muted" : ""} ${value < 0 ? "negative" : ""}`}><span>{label}</span><strong>{MONEY.format(value)}</strong><small>{percent === null || percent === undefined ? "" : `${NUMBER.format(percent * 100)}%`}</small></div>;
+}
+const FEE_CATEGORY_LABEL: Record<FeeCategory, string> = { tax: "Imposto", card_fee: "Cartão", platform_fee: "Plataforma", other: "Outra taxa" };
+function FeeBreakdown({ rows }: { rows: DreSummary["feeBreakdown"] }) {
+  return rows.length ? <div className="fee-breakdown-list">{rows.map((row) => <div key={`${row.category}-${row.name}`}><span><strong>{row.name}</strong><small>{FEE_CATEGORY_LABEL[row.category]}</small></span><span><b>{NUMBER.format(row.percentage * 100)}%</b><strong>{MONEY.format(row.amount)}</strong></span></div>)}</div> : <EmptyMini text="Nenhuma taxa vigente cadastrada para este período." />;
 }
 function DreCompareRow({ label, current, previous, money }: { label: string; current: number | null; previous: number | null; money?: boolean }) {
   const format = (value: number | null) => value === null ? "—" : money ? MONEY.format(value) : `${NUMBER.format(value * 100)}%`;
@@ -693,8 +727,8 @@ function InsightsPage(props: Parameters<typeof SectionContent>[0]) {
   const range = props.range;
   const previousRange = previousEquivalentRange(range);
   const apiHasData = props.data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
-  const current = useMemo(() => computeDreSummary(props.data.zig, props.data.catalogItems, props.data.expenses, range, apiHasData, props.data.sales), [props.data.zig, props.data.catalogItems, props.data.expenses, range, apiHasData, props.data.sales]);
-  const previous = useMemo(() => computeDreSummary(props.data.previousZig, props.data.catalogItems, props.data.expenses, previousRange, apiHasData, props.data.sales), [props.data.previousZig, props.data.catalogItems, props.data.expenses, previousRange, apiHasData, props.data.sales]);
+  const current = useMemo(() => computeDreSummary(props.data.zig, props.data.catalogItems, props.data.expenses, props.data.feeRates, range, apiHasData, props.data.sales), [props.data.zig, props.data.catalogItems, props.data.expenses, props.data.feeRates, range, apiHasData, props.data.sales]);
+  const previous = useMemo(() => computeDreSummary(props.data.previousZig, props.data.catalogItems, props.data.expenses, props.data.feeRates, previousRange, apiHasData, props.data.sales), [props.data.previousZig, props.data.catalogItems, props.data.expenses, props.data.feeRates, previousRange, apiHasData, props.data.sales]);
   const operationalAreas = useMemo(() => props.data.areas.filter((area) => area.is_operational), [props.data.areas]);
   const sectorResults = useMemo(() => computeSectorResults(props.data.sectorProfitability.products, props.data.expenses, range, operationalAreas), [props.data.sectorProfitability, props.data.expenses, range, operationalAreas]);
   const previousSectorResults = useMemo(() => computeSectorResults(props.data.previousSectorProfitability.products, props.data.expenses, previousRange, operationalAreas), [props.data.previousSectorProfitability, props.data.expenses, previousRange, operationalAreas]);
@@ -757,8 +791,8 @@ function InsightsPage(props: Parameters<typeof SectionContent>[0]) {
 function AttentionPanel({ data, range }: { data: DataState; range: DateRange }) {
   const previousRange = previousEquivalentRange(range);
   const apiHasData = data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
-  const current = useMemo(() => computeDreSummary(data.zig, data.catalogItems, data.expenses, range, apiHasData, data.sales), [data.zig, data.catalogItems, data.expenses, range, apiHasData, data.sales]);
-  const previous = useMemo(() => computeDreSummary(data.previousZig, data.catalogItems, data.expenses, previousRange, apiHasData, data.sales), [data.previousZig, data.catalogItems, data.expenses, previousRange, apiHasData, data.sales]);
+  const current = useMemo(() => computeDreSummary(data.zig, data.catalogItems, data.expenses, data.feeRates, range, apiHasData, data.sales), [data.zig, data.catalogItems, data.expenses, data.feeRates, range, apiHasData, data.sales]);
+  const previous = useMemo(() => computeDreSummary(data.previousZig, data.catalogItems, data.expenses, data.feeRates, previousRange, apiHasData, data.sales), [data.previousZig, data.catalogItems, data.expenses, data.feeRates, previousRange, apiHasData, data.sales]);
   const operationalAreas = useMemo(() => data.areas.filter((area) => area.is_operational), [data.areas]);
   const sectorResults = useMemo(() => computeSectorResults(data.sectorProfitability.products, data.expenses, range, operationalAreas), [data.sectorProfitability, data.expenses, range, operationalAreas]);
   const previousSectorResults = useMemo(() => computeSectorResults(data.previousSectorProfitability.products, data.expenses, previousRange, operationalAreas), [data.previousSectorProfitability, data.expenses, previousRange, operationalAreas]);
@@ -1700,6 +1734,73 @@ function StructuralExpenseEditModal({ businessId, areas, expense, onClose, onSav
       <div className="personnel-form-actions"><button type="submit" disabled={saving}>{saving ? "Salvando…" : "Salvar"}</button></div>
     </form>}
   </div></div>;
+}
+
+function feeRateStatus(rate: BusinessFeeRate, today: string) {
+  if (!rate.is_active) return { label: "Desativada", className: "inactive" };
+  if (rate.effective_from > today) return { label: "Agendada", className: "scheduled" };
+  if (rate.effective_to && rate.effective_to < today) return { label: "Encerrada", className: "ended" };
+  return { label: "Vigente", className: "active" };
+}
+function FeeRatesSettings(props: Parameters<typeof SectionContent>[0]) {
+  const [editing, setEditing] = useState<BusinessFeeRate | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const today = isoInSaoPaulo();
+  const currentTotal = props.data.feeRates.filter((rate) => feeRateAppliesOn(rate, today)).reduce((sum, rate) => sum + Number(rate.percentage), 0);
+  async function toggle(rate: BusinessFeeRate) {
+    const action = rate.is_active ? "desativar" : "ativar";
+    if (!confirm(`Deseja ${action} ${rate.name}?`)) return;
+    setBusyId(rate.id);
+    const { error } = await supabase.from("business_fee_rates").update({ is_active: !rate.is_active, updated_at: new Date().toISOString() }).eq("id", rate.id).eq("business_id", props.businessId);
+    setBusyId(null);
+    if (error) return alert("Não foi possível alterar esta taxa.");
+    await props.onRefresh();
+  }
+  return <section className="fee-settings-page"><ModuleHero eyebrow="Financeiro" title="Taxas e impostos" description="Gerencie os percentuais aplicados ao faturamento no DRE sem perder o histórico de vigências." icon={<ReceiptText size={19} />} />
+    <div className="fee-settings-summary"><span>Total vigente hoje</span><strong>{NUMBER.format(currentTotal * 100)}%</strong><small>Aplicado sobre a receita líquida</small></div>
+    <article className="chart-card fee-settings-card"><div className="card-title-row"><div><p>Configuração</p><h3>Histórico de taxas</h3></div><span>{props.data.feeRates.length} registro(s)</span></div>
+      <div className="fee-rates-table-wrap"><div className="fee-rates-table"><div className="fee-rate-row fee-rate-head"><span>Taxa</span><span>Categoria</span><span>Percentual</span><span>Vigência</span><span>Status</span><span>Ações</span></div>{props.data.feeRates.map((rate) => { const status = feeRateStatus(rate, today); return <div className="fee-rate-row" key={rate.id}><strong>{rate.name}</strong><span>{FEE_CATEGORY_LABEL[rate.category]}</span><strong>{NUMBER.format(Number(rate.percentage) * 100)}%</strong><span>{dateLabel(rate.effective_from)}{rate.effective_to ? ` até ${dateLabel(rate.effective_to)}` : " em diante"}</span><span className={`fee-rate-status ${status.className}`}>{status.label}</span><FeeRateMenu rate={rate} busy={busyId === rate.id} onEdit={() => setEditing(rate)} onToggle={() => toggle(rate)} /></div>; })}</div></div>
+      {!props.data.feeRates.length && <EmptyMini text="Nenhuma taxa cadastrada no Supabase." />}
+    </article>
+    {editing && <FeeRateModal rate={editing} businessId={props.businessId} userId={props.userId} onClose={() => setEditing(null)} onSaved={async () => { await props.onRefresh(); setEditing(null); }} />}
+  </section>;
+}
+function FeeRateMenu({ rate, busy, onEdit, onToggle }: { rate: BusinessFeeRate; busy: boolean; onEdit: () => void; onToggle: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { function outside(event: PointerEvent) { if (!ref.current?.contains(event.target as Node)) setOpen(false); } document.addEventListener("pointerdown", outside); return () => document.removeEventListener("pointerdown", outside); }, []);
+  return <div className="row-action-menu" ref={ref}><button className="row-action-trigger" type="button" aria-label={`Ações de ${rate.name}`} aria-expanded={open} disabled={busy} onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} /></button>{open && <div className="row-action-popover" role="menu"><button type="button" onClick={() => { setOpen(false); onEdit(); }}><Pencil size={14} /> Nova vigência</button><button type="button" onClick={() => { setOpen(false); void onToggle(); }}>{rate.is_active ? <X size={14} /> : <CheckCircle2 size={14} />}{rate.is_active ? "Desativar" : "Ativar"}</button></div>}</div>;
+}
+function FeeRateModal({ rate, businessId, userId, onClose, onSaved }: { rate: BusinessFeeRate; businessId: string; userId: string; onClose: () => void; onSaved: () => Promise<void> }) {
+  useEscapeToClose(onClose);
+  const [percentage, setPercentage] = useState(String(Number(rate.percentage) * 100).replace(".", ","));
+  const [effectiveFrom, setEffectiveFrom] = useState(isoInSaoPaulo());
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+  async function save(event: React.FormEvent) {
+    event.preventDefault();
+    const parsed = Number(percentage.replace(",", "."));
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) return setMessage("Informe um percentual entre 0% e 100%.");
+    if (!effectiveFrom) return setMessage("Informe o início da nova vigência.");
+    if (effectiveFrom < rate.effective_from) return setMessage(`A nova vigência não pode começar antes de ${dateLabel(rate.effective_from)}.`);
+    setSaving(true); setMessage("");
+    const nextPercentage = parsed / 100;
+    if (effectiveFrom === rate.effective_from) {
+      const { error } = await supabase.from("business_fee_rates").update({ percentage: nextPercentage, is_active: true, updated_at: new Date().toISOString() }).eq("id", rate.id).eq("business_id", businessId);
+      if (error) { setMessage(error.message); setSaving(false); return; }
+    } else {
+      const previousEnd = rate.effective_to;
+      const { error: closeError } = await supabase.from("business_fee_rates").update({ effective_to: shiftDate(effectiveFrom, -1), updated_at: new Date().toISOString() }).eq("id", rate.id).eq("business_id", businessId);
+      if (closeError) { setMessage(closeError.message); setSaving(false); return; }
+      const { error: insertError } = await supabase.from("business_fee_rates").insert({ business_id: Number(businessId), name: rate.name, category: rate.category, percentage: nextPercentage, effective_from: effectiveFrom, effective_to: null, is_active: true, notes: rate.notes, created_by: userId });
+      if (insertError) {
+        await supabase.from("business_fee_rates").update({ effective_to: previousEnd, updated_at: new Date().toISOString() }).eq("id", rate.id).eq("business_id", businessId);
+        setMessage(insertError.message); setSaving(false); return;
+      }
+    }
+    await onSaved();
+  }
+  return <div className="modal-backdrop"><form className="modal-card fee-rate-modal" onSubmit={save}><button type="button" className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Nova vigência</p><h2>{rate.name}</h2><p className="modal-description">O valor anterior será preservado até o dia anterior ao início desta vigência.</p><div className="form-grid"><label><span>Novo percentual</span><input value={percentage} onChange={(event) => setPercentage(event.target.value)} inputMode="decimal" placeholder="0,00" /></label><label><span>Aplicar a partir de</span><input type="date" value={effectiveFrom} onChange={(event) => setEffectiveFrom(event.target.value)} /></label></div>{message && <p className="modal-message">{message}</p>}<div className="modal-actions"><button type="button" className="modal-secondary" onClick={onClose}>Cancelar</button><button className="modal-primary" disabled={saving}>{saving ? "Salvando…" : "Criar vigência"}</button></div></form></div>;
 }
 
 function ImportsPage(props: Parameters<typeof SectionContent>[0]) {
