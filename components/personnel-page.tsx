@@ -7,7 +7,7 @@ import { useEscapeToClose } from "@/lib/use-escape-close";
 
 type Range = { start: string; end: string };
 type Employee = { id: string; name: string; cpf: string | null; pix_key: string | null; default_hourly_rate: number | null; is_active: boolean; notes: string | null };
-type Shift = { id: string; employee_id: string; employee_name: string; shift_date: string; start_time: string | null; end_time: string | null; break_minutes: number; hours_worked: number; rate_snapshot: number; amount_due: number; payment_status: PaymentStatus; payment_method: string | null };
+type Shift = { id: string; employee_id: string; employee_name: string; shift_date: string; start_time: string | null; end_time: string | null; break_minutes: number; hours_worked: number; rate_snapshot: number; amount_due: number; payment_status: PaymentStatus; payment_method: string | null; batch_id: string | null };
 type PersonnelCost = { id: string; employee_id: string | null; employee_name: string | null; cost_date: string; cost_type: string; description: string; amount: number; payment_status: PaymentStatus; payment_method: string | null };
 type Closing = { id: string; period_start: string; period_end: string; status: PaymentStatus; total_amount: number; payment_method: string | null; items: { employee_id: string; employee_name: string; amount: number; hours_worked: number }[] };
 type ConsumptionByDay = { employee_id: string; operational_date: string; sale_cents: number; cost_cents: number };
@@ -67,10 +67,12 @@ export function PersonnelPage({ businessId, userId, range, onExpensesChanged }: 
   const filteredEmployees = useMemo(() => data.employees.filter((row) => row.name.toLowerCase().includes(query.toLowerCase())), [data.employees, query]);
 
   async function refreshed() { await Promise.all([reload(), onExpensesChanged()]); setModal(null); }
-  async function togglePayment(sourceType: "work_shift" | "personnel_cost", id: string, paidNow: boolean) {
+  async function togglePayment(sourceType: "work_shift" | "personnel_cost", ids: string[], paidNow: boolean) {
     const method = paidNow ? window.prompt("Forma de pagamento (ex.: PIX, dinheiro):", "PIX") ?? "" : "";
     if (paidNow && !method.trim()) return;
-    const { error: rpcError } = await supabase.rpc("set_personnel_payment", { p_business_id: Number(businessId), p_source_type: sourceType, p_source_id: Number(id), p_paid: paidNow, p_payment_method: method });
+    const { error: rpcError } = ids.length > 1
+      ? await supabase.rpc("set_personnel_payment_batch", { p_business_id: Number(businessId), p_source_type: sourceType, p_source_ids: ids.map(Number), p_paid: paidNow, p_payment_method: method })
+      : await supabase.rpc("set_personnel_payment", { p_business_id: Number(businessId), p_source_type: sourceType, p_source_id: Number(ids[0]), p_paid: paidNow, p_payment_method: method });
     if (rpcError) return alert("Não foi possível atualizar o pagamento.");
     await refreshed();
   }
@@ -80,17 +82,17 @@ export function PersonnelPage({ businessId, userId, range, onExpensesChanged }: 
     if (rpcError) return alert("Não foi possível pagar este fechamento.");
     await refreshed();
   }
-  async function deletePersonnelEntry(sourceType: "work_shift" | "personnel_cost", id: string, employeeName: string) {
-    const label=sourceType==='work_shift'?'jornada':'custo adicional';
-    if(!window.confirm(`Excluir ${label} de ${employeeName}?\n\nO lançamento e a despesa correspondente serão removidos permanentemente.`))return;
+  async function deletePersonnelEntry(sourceType: "work_shift" | "personnel_cost", ids: string[], employeeName: string) {
+    const label=sourceType==='work_shift'?(ids.length>1?`${ids.length} jornadas`:'jornada'):'custo adicional';
+    if(!window.confirm(`Excluir ${label} de ${employeeName}?\n\nO(s) lançamento(s) e a(s) despesa(s) correspondente(s) serão removidos permanentemente.`))return;
     const table=sourceType==='work_shift'?'work_shifts':'personnel_cost_entries';
-    const linked=await supabase.from(table).select('payroll_closing_id').eq('id',id).eq('business_id',businessId).maybeSingle();
+    const linked=await supabase.from(table).select('id,payroll_closing_id').in('id',ids).eq('business_id',businessId);
     if(linked.error)return alert('Não foi possível verificar este lançamento. Tente novamente.');
-    if(linked.data?.payroll_closing_id)return alert('Este lançamento faz parte de um fechamento. Exclua primeiro o fechamento da folha e tente novamente.');
-    const removed=await supabase.from(table).delete().eq('id',id).eq('business_id',businessId);
-    if(removed.error)return alert('Não foi possível excluir este lançamento.');
-    const expenseRemoved=await supabase.from('expenses').delete().eq('business_id',businessId).eq('source_type',sourceType).eq('source_id',id);
-    if(expenseRemoved.error)alert('O lançamento foi excluído, mas não foi possível atualizar a despesa correspondente. Atualize a página e tente novamente.');
+    if(linked.data?.some(row=>row.payroll_closing_id))return alert('Um ou mais lançamentos fazem parte de um fechamento. Exclua primeiro o fechamento da folha e tente novamente.');
+    const removed=await supabase.from(table).delete().in('id',ids).eq('business_id',businessId);
+    if(removed.error)return alert('Não foi possível excluir este(s) lançamento(s).');
+    const expenseRemoved=await supabase.from('expenses').delete().eq('business_id',businessId).eq('source_type',sourceType).in('source_id',ids);
+    if(expenseRemoved.error)alert('O(s) lançamento(s) foram excluídos, mas não foi possível atualizar a(s) despesa(s) correspondente(s). Atualize a página e tente novamente.');
     await refreshed();
   }
   async function deleteClosing(row: Closing) {
@@ -142,29 +144,65 @@ function Kpi({label,value,note,tone=""}:{label:string;value:string;note:string;t
 function Empty({text}:{text:string}) { return <div className="personnel-empty">{text}</div>; }
 function Status({value}:{value:PaymentStatus}) { return <span className={`personnel-status ${value}`}>{value==='paid'?'Pago':value==='pending'?'Pendente':'Cancelado'}</span>; }
 
-function Obligations({shifts,costs,employees,consumptionByDay,businessId,onPayment,onDelete}:{shifts:Shift[];costs:PersonnelCost[];employees:Employee[];consumptionByDay:ConsumptionByDay[];businessId:string;onPayment:(type:"work_shift"|"personnel_cost",id:string,paid:boolean)=>Promise<void>;onDelete:(type:"work_shift"|"personnel_cost",id:string,name:string)=>Promise<void>}) {
+function Obligations({shifts,costs,employees,consumptionByDay,businessId,onPayment,onDelete}:{shifts:Shift[];costs:PersonnelCost[];employees:Employee[];consumptionByDay:ConsumptionByDay[];businessId:string;onPayment:(type:"work_shift"|"personnel_cost",ids:string[],paid:boolean)=>Promise<void>;onDelete:(type:"work_shift"|"personnel_cost",ids:string[],name:string)=>Promise<void>}) {
   const pixByEmployee=new Map(employees.map(row=>[String(row.id),row.pix_key]));
   const costByEmployeeDay=new Map(consumptionByDay.map(row=>[`${row.employee_id}|${row.operational_date}`,row.cost_cents]));
+  const singleShifts=shifts.filter(row=>!row.batch_id);
+  const batchGroups=new Map<string,Shift[]>();
+  shifts.filter(row=>row.batch_id).forEach(row=>{const key=row.batch_id as string;batchGroups.set(key,[...(batchGroups.get(key)||[]),row]);});
   const rows=[
-    ...shifts.map(row=>{
+    ...singleShifts.map(row=>{
       const deductionCents=row.employee_id?costByEmployeeDay.get(`${row.employee_id}|${row.shift_date}`)||0:0;
-      return {id:row.id,type:'work_shift' as const,date:row.shift_date,employeeId:row.employee_id,name:row.employee_name,pix:pixByEmployee.get(String(row.employee_id))||null,description:`${NUMBER.format(row.hours_worked)} h`,grossAmount:Number(row.amount_due),deductionCents,status:row.payment_status};
+      return {key:`work_shift-${row.id}`,type:'work_shift' as const,date:row.shift_date,employeeId:row.employee_id,name:row.employee_name,pix:pixByEmployee.get(String(row.employee_id))||null,description:`${NUMBER.format(row.hours_worked)} h`,grossAmount:Number(row.amount_due),deductionCents,status:row.payment_status,ids:[row.id],days:[row] as Shift[]};
     }),
-    ...costs.map(row=>({id:row.id,type:'personnel_cost' as const,date:row.cost_date,employeeId:row.employee_id,name:row.employee_name||'Custo geral',pix:row.employee_id?pixByEmployee.get(String(row.employee_id))||null:null,description:`${COST_TYPES[row.cost_type]||row.cost_type} · ${row.description}`,grossAmount:Number(row.amount),deductionCents:0,status:row.payment_status})),
+    ...[...batchGroups.entries()].map(([batchId,rowsInBatch])=>{
+      const sorted=[...rowsInBatch].sort((a,b)=>a.shift_date.localeCompare(b.shift_date));
+      const employeeId=sorted[0].employee_id;
+      const deductionCents=sorted.reduce((sum,row)=>sum+(row.employee_id?costByEmployeeDay.get(`${row.employee_id}|${row.shift_date}`)||0:0),0);
+      const totalHours=sorted.reduce((sum,row)=>sum+Number(row.hours_worked),0);
+      const allPaid=sorted.every(row=>row.payment_status==='paid');
+      const anyPending=sorted.some(row=>row.payment_status==='pending');
+      return {key:`work_shift_batch-${batchId}`,type:'work_shift' as const,date:sorted[sorted.length-1].shift_date,employeeId,name:sorted[0].employee_name,pix:pixByEmployee.get(String(employeeId))||null,description:`${sorted.length} dias · ${NUMBER.format(totalHours)} h`,grossAmount:sorted.reduce((sum,row)=>sum+Number(row.amount_due),0),deductionCents,status:allPaid?'paid' as PaymentStatus:anyPending?'pending' as PaymentStatus:'cancelled' as PaymentStatus,ids:sorted.map(row=>row.id),days:sorted,isBatch:true};
+    }),
+    ...costs.map(row=>({key:`personnel_cost-${row.id}`,type:'personnel_cost' as const,date:row.cost_date,employeeId:row.employee_id,name:row.employee_name||'Custo geral',pix:row.employee_id?pixByEmployee.get(String(row.employee_id))||null:null,description:`${COST_TYPES[row.cost_type]||row.cost_type} · ${row.description}`,grossAmount:Number(row.amount),deductionCents:0,status:row.payment_status,ids:[row.id],days:[] as Shift[]})),
   ].sort((a,b)=>b.date.localeCompare(a.date));
   return <div className="obligation-list">{rows.length?rows.map(row=>{
     const deduction=row.deductionCents/100;
     const netAmount=row.grossAmount-deduction;
-    return <div key={`${row.type}-${row.id}`}>
-      <span><b>{row.name}</b><small>{dateLabel(row.date)} · {row.description}</small></span>
+    const extra:{label:string;icon:React.ReactNode;render:(close:()=>void)=>React.ReactNode}[]=[];
+    if(row.type==='work_shift'&&'isBatch' in row&&row.isBatch&&row.employeeId){
+      extra.push({label:'Ver detalhes',icon:<Receipt size={14}/>,render:(close:()=>void)=><BatchDetailModal key="batch-detail" businessId={businessId} employeeId={row.employeeId as string} employeeName={row.name} days={row.days} costByEmployeeDay={costByEmployeeDay} onClose={close}/>});
+    } else if(row.type==='work_shift'&&row.employeeId){
+      extra.push({label:'Ver consumo do dia',icon:<Receipt size={14}/>,render:(close:()=>void)=><DayConsumptionModal key="day-consumption" businessId={businessId} employeeId={row.employeeId as string} employeeName={row.name} date={row.date} onClose={close}/>});
+    }
+    return <div key={row.key}>
+      <span><b>{row.name}</b><small>{'isBatch' in row&&row.isBatch?row.description:`${dateLabel(row.date)} · ${row.description}`}</small></span>
       <span className="obligation-pix">{row.pix?<>Pix<b>{row.pix}</b></>:null}</span>
       <span className="obligation-amount"><small>Total</small><b>{row.grossAmount>0?MONEY.format(row.grossAmount):'Somente horas'}</b></span>
       <span className="obligation-amount"><small>Com desconto</small><strong className={netAmount<0?'negative':''}>{row.grossAmount>0?MONEY.format(netAmount):'Somente horas'}</strong></span>
       <Status value={row.status}/>
-      {row.grossAmount>0?<button onClick={()=>onPayment(row.type,row.id,row.status!=='paid')}>{row.status==='paid'?'Reabrir':'Marcar pago'}</button>:<span/>}
-      <RowDeleteMenu label={`${row.description} de ${row.name}`} onDelete={()=>onDelete(row.type,row.id,row.name)} extra={row.type==='work_shift'&&row.employeeId?[{label:'Ver consumo do dia',icon:<Receipt size={14}/>,render:(close:()=>void)=><DayConsumptionModal key="day-consumption" businessId={businessId} employeeId={row.employeeId as string} employeeName={row.name} date={row.date} onClose={close}/>}]:undefined}/>
+      {row.grossAmount>0?<button onClick={()=>onPayment(row.type,row.ids,row.status!=='paid')}>{row.status==='paid'?'Reabrir':'Marcar pago'}</button>:<span/>}
+      <RowDeleteMenu label={`${row.description} de ${row.name}`} onDelete={()=>onDelete(row.type,row.ids,row.name)} extra={extra.length?extra:undefined}/>
     </div>;
   }):<Empty text="Nenhum lançamento no período selecionado."/>}</div>;
+}
+
+function BatchDetailModal({businessId,employeeId,employeeName,days,costByEmployeeDay,onClose}:{businessId:string;employeeId:string;employeeName:string;days:Shift[];costByEmployeeDay:Map<string,number>;onClose:()=>void}) {
+  const [dayFocus,setDayFocus]=useState<string|null>(null);
+  const sorted=[...days].sort((a,b)=>a.shift_date.localeCompare(b.shift_date));
+  return <Modal title={`Detalhes da semana · ${employeeName}`} subtitle="Cada dia lançado, com horário, valor e desconto do consumo naquele dia." onClose={onClose}>
+    <div className="day-detail-list">{sorted.map(day=>{
+      const deduction=(costByEmployeeDay.get(`${employeeId}|${day.shift_date}`)||0)/100;
+      const netAmount=Number(day.amount_due)-deduction;
+      return <div key={day.id}>
+        <span><b>{dateLabel(day.shift_date)}</b><small>{day.start_time?.slice(0,5)} às {day.end_time?.slice(0,5)} · {NUMBER.format(day.hours_worked)} h</small></span>
+        <span className="obligation-amount"><small>Total</small><b>{MONEY.format(Number(day.amount_due))}</b></span>
+        <span className="obligation-amount"><small>Com desconto</small><strong className={netAmount<0?'negative':''}>{MONEY.format(netAmount)}</strong></span>
+        <button type="button" onClick={()=>setDayFocus(day.shift_date)}><Receipt size={13}/> Consumo</button>
+      </div>;
+    })}</div>
+    {dayFocus&&<DayConsumptionModal businessId={businessId} employeeId={employeeId} employeeName={employeeName} date={dayFocus} onClose={()=>setDayFocus(null)}/>}
+  </Modal>;
 }
 
 function RowDeleteMenu({label,onDelete,extra}:{label:string;onDelete:()=>Promise<void>;extra?:{label:string;icon:React.ReactNode;render:(close:()=>void)=>React.ReactNode}[]}) {
@@ -333,11 +371,11 @@ function WeeklyShiftModal({businessId,employees,range,onClose,onSaved}:{business
  const checkedCount=dateList.filter(date=>days[date]?.checked).length;
  async function save(e:React.FormEvent){
   e.preventDefault();
-  if(!employeeId)return setMessage('Selecione uma pessoa.');
+  if(!employeeId){setMessage('Selecione uma pessoa.');window.alert('Selecione uma pessoa.');return;}
   const rateValue=decimal(rate);
-  if(rateValue<=0)return setMessage('Informe o valor da hora.');
+  if(rateValue<=0){setMessage('Informe o valor da hora.');window.alert('Informe o valor da hora antes de lançar.');return;}
   const selectedDays=dateList.filter(date=>days[date]?.checked).map(date=>({shift_date:date,start_time:days[date].start_time,end_time:days[date].end_time}));
-  if(!selectedDays.length)return setMessage('Marque ao menos um dia trabalhado.');
+  if(!selectedDays.length){setMessage('Marque ao menos um dia trabalhado.');window.alert('Marque ao menos um dia trabalhado.');return;}
   setBusy(true);
   const result=await supabase.rpc('save_work_shifts_batch',{p_business_id:Number(businessId),p_employee_id:Number(employeeId),p_rate_override:rateValue,p_break_minutes:decimal(breakMinutes),p_days:selectedDays,p_notes:notes});
   setBusy(false);
