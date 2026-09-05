@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { ErpApiError } from "@/lib/erp-api/auth";
 
 export type PurchaseIntakeBody = {
   businessId?: number;
@@ -33,6 +34,13 @@ export type PurchaseIntakeBody = {
     lineTotal?: number | string;
   }>;
   miscItems?: Array<{ description?: string; quantity?: number | string; unit?: string; unitCost?: number | string; lineTotal?: number | string }>;
+};
+
+export type PurchaseCommandContext = {
+  admin: SupabaseClient;
+  businessId: number;
+  actorId: string | null;
+  source: "assistant_api" | "user_session" | "mcp";
 };
 
 type MissingField = { path: string; message: string };
@@ -191,5 +199,38 @@ export async function validatePurchaseIntake(admin: SupabaseClient, businessId: 
       areas: areas.map((row) => ({ id: Number(row.id), name: row.name })),
       categories: categories.map((row) => ({ id: Number(row.id), name: row.name, itemType: row.kind })),
     },
+  };
+}
+
+export async function commitPurchaseIntake(context: PurchaseCommandContext, body: PurchaseIntakeBody) {
+  const validation = await validatePurchaseIntake(context.admin, context.businessId, body);
+  if (!validation.readyToCommit) {
+    return {
+      ...validation,
+      committed: false as const,
+      error: "A compra não foi gravada porque ainda existem informações pendentes.",
+    };
+  }
+
+  const idempotencyKey = body.idempotencyKey?.trim() ?? "";
+  if (idempotencyKey.length < 8 || idempotencyKey.length > 160) throw new ErpApiError("Informe uma chave idempotencyKey estável para esta nota.", 400);
+
+  const { data, error } = await context.admin.rpc("ingest_complete_purchase", {
+    p_business_id: context.businessId,
+    p_idempotency_key: idempotencyKey,
+    p_supplier: validation.normalized.supplier,
+    p_purchase: validation.normalized.purchase,
+    p_items: validation.normalized.items,
+    p_misc_items: validation.normalized.misc_items,
+    p_actor_id: context.actorId,
+    p_source: context.source,
+  });
+  if (error) throw new ErpApiError(error.message, 409);
+  return {
+    status: "committed" as const,
+    committed: true as const,
+    businessId: context.businessId,
+    result: data,
+    message: "Compra, fornecedor, itens, despesa e estoque foram processados em uma única transação.",
   };
 }
