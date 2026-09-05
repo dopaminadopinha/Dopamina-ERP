@@ -1,0 +1,115 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Dopamina ERP — Compras e Estoque",
+    "version": "1.0.0",
+    "description": "Valida e confirma compras, recebimentos e operações de estoque sem gravar dados incompletos. Sempre valide, pergunte as pendências ao usuário e peça confirmação antes do commit."
+  },
+  "servers": [{ "url": "https://dopamina-erp.vercel.app" }],
+  "security": [{ "bearerAuth": [] }],
+  "paths": {
+    "/api/erp/purchases/intake": {
+      "post": {
+        "operationId": "validateOrCommitPurchase",
+        "summary": "Validar ou confirmar uma compra completa",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PurchaseIntake" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Validação concluída; pode conter perguntas obrigatórias" },
+          "201": { "description": "Compra confirmada atomicamente" },
+          "422": { "description": "Nenhum dado gravado; informações obrigatórias ausentes" }
+        }
+      }
+    },
+    "/api/erp/stock": {
+      "get": {
+        "operationId": "getStockContext",
+        "summary": "Consultar itens, saldos e movimentações",
+        "parameters": [
+          { "in": "query", "name": "start", "schema": { "type": "string", "format": "date" } },
+          { "in": "query", "name": "end", "schema": { "type": "string", "format": "date" } }
+        ],
+        "responses": { "200": { "description": "Contexto atual do estoque" } }
+      },
+      "post": {
+        "operationId": "validateOrCommitStockCommand",
+        "summary": "Validar ou confirmar movimentação/inventário",
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/StockCommand" } } }
+        },
+        "responses": {
+          "200": { "description": "Validação concluída" },
+          "201": { "description": "Operação confirmada" },
+          "422": { "description": "Nenhum dado gravado; informações ausentes" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer" }
+    },
+    "schemas": {
+      "PurchaseIntake": {
+        "type": "object",
+        "properties": {
+          "mode": { "type": "string", "enum": ["validate", "commit"] },
+          "idempotencyKey": { "type": "string" },
+          "supplier": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "integer" }, "name": { "type": "string" }, "document": { "type": "string" },
+              "contactName": { "type": "string" }, "phone": { "type": "string" }, "email": { "type": "string" }, "notes": { "type": "string" }
+            }
+          },
+          "purchase": {
+            "type": "object",
+            "properties": {
+              "date": { "type": "string", "format": "date" }, "invoiceNumber": { "type": "string" },
+              "paymentMethod": { "type": "string" }, "paymentStatus": { "type": "string", "enum": ["paid", "pending"] },
+              "dueDate": { "type": ["string", "null"], "format": "date" }, "received": { "type": "boolean" },
+              "receivedDate": { "type": "string", "format": "date" }, "declaredTotal": { "type": ["number", "string"] }, "notes": { "type": "string" }
+            }
+          },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/PurchaseItem" } },
+          "miscItems": { "type": "array", "items": { "$ref": "#/components/schemas/MiscItem" } }
+        }
+      },
+      "PurchaseItem": {
+        "type": "object",
+        "properties": {
+          "itemId": { "type": "integer" }, "name": { "type": "string" }, "sku": { "type": "string" },
+          "itemType": { "type": "string", "enum": ["product", "ingredient", "consumable"] },
+          "category": { "type": "string" }, "sector": { "type": "string" }, "quantity": { "type": ["number", "string"] },
+          "unit": { "type": "string" }, "stockUnit": { "type": "string" }, "unitsPerPackage": { "type": ["number", "string"] },
+          "unitCost": { "type": ["number", "string"] }, "lineTotal": { "type": ["number", "string"] }
+        }
+      },
+      "MiscItem": {
+        "type": "object",
+        "properties": {
+          "description": { "type": "string" }, "quantity": { "type": ["number", "string"] }, "unit": { "type": "string" },
+          "unitCost": { "type": ["number", "string"] }, "lineTotal": { "type": ["number", "string"] }
+        }
+      },
+      "StockCommand": {
+        "type": "object",
+        "properties": {
+          "mode": { "type": "string", "enum": ["validate", "commit"] }, "idempotencyKey": { "type": "string" },
+          "operation": { "type": "string", "enum": ["movement", "inventory"] }, "date": { "type": "string", "format": "date" },
+          "itemId": { "type": "integer" }, "itemName": { "type": "string" },
+          "reason": { "type": "string", "enum": ["other_in", "breakage", "waste", "expiration", "courtesy", "internal_consumption", "operational_error", "loss", "other_out"] },
+          "quantity": { "type": ["number", "string"] }, "unitCost": { "type": ["number", "string", "null"] }, "notes": { "type": "string" },
+          "items": { "type": "array", "items": { "type": "object", "properties": { "itemId": { "type": "integer" }, "itemName": { "type": "string" }, "countedQuantity": { "type": ["number", "string"] } } } }
+        }
+      }
+    }
+  }
+}
