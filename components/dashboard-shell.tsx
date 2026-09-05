@@ -1317,7 +1317,55 @@ function StockMovementHistory({ rows }: { rows: StockMovement[] }) {
   </section>;
 }
 
-function StockInventoryHistory({ rows, onNew }: { rows: StockInventory[]; onNew: () => void }) { return <section className="stock-history-section"><div className="stock-section-heading"><div><p>Conferência física</p><h3>Inventários concluídos</h3><span>Cada diferença permanece registrada mesmo depois de corrigir o saldo teórico.</span></div><button type="button" onClick={onNew}><Plus size={15} /> Nova contagem</button></div>{rows.length ? <div className="inventory-history-grid">{rows.map((row) => <article key={row.id}><span>{new Date(row.counted_at).toLocaleString("pt-BR")}</span><strong>{row.item_count} item(ns) contados</strong><div><small>Com diferença</small><b>{row.divergent_items}</b></div><div><small>Valor das diferenças</small><b>{MONEY.format(Number(row.variance_value))}</b></div><p>{row.notes || "Sem observações"}</p></article>)}</div> : <div className="stock-empty-action"><ClipboardList size={25} /><h3>Nenhum inventário realizado</h3><p>A primeira contagem cria a base física do estoque sem apagar as vendas já registradas.</p><button type="button" onClick={onNew}>Começar contagem</button></div>}</section>; }
+function StockInventoryHistory({ rows, onNew }: { rows: StockInventory[]; onNew: () => void }) {
+  const [detail, setDetail] = useState<StockInventory | null>(null);
+  return <section className="stock-history-section"><div className="stock-section-heading"><div><p>Conferência física</p><h3>Inventários concluídos</h3><span>Cada diferença permanece registrada mesmo depois de corrigir o saldo teórico.</span></div><button type="button" onClick={onNew}><Plus size={15} /> Nova contagem</button></div>
+    {rows.length ? <div className="data-table-card table-scroll"><div className="responsive-table inventory-history-table"><div className="table-row table-header"><span>Data</span><span>Itens contados</span><span>Com diferença</span><span>Valor das diferenças</span><span>Observações</span><span></span></div>{rows.map((row) => <div className="table-row" key={row.id}><span>{new Date(row.counted_at).toLocaleString("pt-BR")}</span><strong>{row.item_count}</strong><strong className={row.divergent_items > 0 ? "negative" : ""}>{row.divergent_items}</strong><strong>{MONEY.format(Number(row.variance_value))}</strong><span>{row.notes || "Sem observações"}</span><span className="row-actions"><InventoryRowMenu label={new Date(row.counted_at).toLocaleString("pt-BR")} onDetails={() => setDetail(row)} /></span></div>)}</div></div> : <div className="stock-empty-action"><ClipboardList size={25} /><h3>Nenhum inventário realizado</h3><p>A primeira contagem cria a base física do estoque sem apagar as vendas já registradas.</p><button type="button" onClick={onNew}>Começar contagem</button></div>}
+    {detail && <InventoryDetailModal inventory={detail} onClose={() => setDetail(null)} />}
+  </section>;
+}
+
+function InventoryRowMenu({ label, onDetails }: { label: string; onDetails: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    function outside(event: PointerEvent) { if (!ref.current?.contains(event.target as Node)) setOpen(false); }
+    function escape(event: KeyboardEvent) { if (event.key === "Escape") setOpen(false); }
+    document.addEventListener("pointerdown", outside);
+    document.addEventListener("keydown", escape);
+    return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
+  }, []);
+  return <div className="row-action-menu" ref={ref}>
+    <button className="row-action-trigger" type="button" aria-label={`Ações de ${label}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} /></button>
+    {open && <div className="row-action-popover" role="menu">
+      <button type="button" role="menuitem" onClick={() => { setOpen(false); onDetails(); }}><Search size={14} /> Ver detalhes</button>
+    </div>}
+  </div>;
+}
+
+type InventoryCountDetail = { item_id: string; system_quantity: number; counted_quantity: number; variance_quantity: number; unit_cost: number | null; items: { name: string; consumption_unit: string } | { name: string; consumption_unit: string }[] | null };
+
+function InventoryDetailModal({ inventory, onClose }: { inventory: StockInventory; onClose: () => void }) {
+  useEscapeToClose(onClose);
+  const [rows, setRows] = useState<InventoryCountDetail[] | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const { data, error: fetchError } = await supabase.from("inventory_count_items").select("item_id,system_quantity,counted_quantity,variance_quantity,unit_cost,items(name,consumption_unit)").eq("inventory_count_id", inventory.id).order("item_id");
+      if (cancelled) return;
+      if (fetchError) { setError("Não foi possível carregar os itens contados."); return; }
+      setRows((data as InventoryCountDetail[] | null) ?? []);
+    }
+    void load();
+    return () => { cancelled = true; };
+  }, [inventory.id]);
+  return <div className="modal-backdrop" role="presentation"><div className="modal-card inventory-detail-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-detail-title"><button className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Conferência física</p><h2 id="inventory-detail-title">{new Date(inventory.counted_at).toLocaleString("pt-BR")}</h2><p className="modal-description">{inventory.notes || "Sem observações"}</p>
+    {error && <p className="modal-message">{error}</p>}
+    {!error && !rows && <p className="modal-help">Carregando itens contados...</p>}
+    {rows && (rows.length ? <div className="inventory-detail-list"><div className="inventory-detail-row header"><span>Item</span><span>Teórico</span><span>Contado</span><span>Diferença</span></div>{rows.map((row) => { const item = nested(row.items); const variance = Number(row.variance_quantity); return <div className="inventory-detail-row" key={row.item_id}><strong>{item?.name ?? "Item removido"}</strong><span>{NUMBER.format(Number(row.system_quantity))} {item?.consumption_unit}</span><span>{NUMBER.format(Number(row.counted_quantity))} {item?.consumption_unit}</span><span className={variance < 0 ? "negative" : ""}>{variance > 0 ? "+" : ""}{NUMBER.format(variance)} {item?.consumption_unit}</span></div>; })}</div> : <p className="modal-help">Nenhum item contado neste inventário.</p>)}
+  </div></div>;
+}
 
 function ModalShell({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: React.ReactNode }) { useEscapeToClose(onClose); return <div className="modal-backdrop" role="presentation"><div className="modal-card stock-modal" role="dialog" aria-modal="true" aria-label={title}><button type="button" className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Estoque</p><h2>{title}</h2><p className="modal-description">{subtitle}</p>{children}</div></div>; }
 
