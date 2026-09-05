@@ -1254,7 +1254,7 @@ function StockPage(props: Parameters<typeof SectionContent>[0]) {
       <div className="module-toolbar stock-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto, ingrediente ou SKU" /></label><select value={sector} onChange={(event) => setSector(event.target.value)} aria-label="Filtrar estoque por setor"><option value="all">Todos os setores</option>{sectors.map((value) => <option key={value}>{value}</option>)}</select><select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filtrar estoque por categoria"><option value="all">Todas as categorias</option>{categories.map((value) => <option key={value}>{value}</option>)}</select><select value={itemType} onChange={(event) => setItemType(event.target.value)} aria-label="Filtrar por tipo de item"><option value="all">Todos os tipos</option><option value="product">Produtos</option><option value="ingredient">Ingredientes</option><option value="consumable">Consumíveis</option></select><select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filtrar por situação"><option value="all">Todas as situações</option>{Object.entries(STOCK_STATUS_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><span className="table-count">{rows.length} item(ns)</span></div>
       <div className="data-table-card stock-scroll-table"><div className="responsive-table stock-current-table"><div className="table-row table-header"><span>Item</span><span>Setor</span><span>Unidade</span><span>Teórico</span><span>Saída no período</span><span>Último físico</span><span>Divergência</span><span>Custo unit.</span><span>Valor atual</span><span>Mínimo</span><span>Situação</span></div>{rows.length ? rows.map((item) => <div className="table-row" key={item.id}><strong>{item.name}<small className="sku-hint">{item.category} · {item.item_type === "product" ? "Produto" : item.item_type === "ingredient" ? "Ingrediente" : "Consumível"}</small></strong><span>{item.sector}</span><span>{item.unit}</span><strong>{item.has_baseline ? NUMBER.format(Number(item.theoretical_quantity)) : "—"}</strong><strong>{NUMBER.format(consumedByItem.get(String(item.id)) ?? Number(item.consumed_period ?? 0))} {item.unit}</strong><span>{item.physical_quantity === null ? "—" : NUMBER.format(Number(item.physical_quantity))}<small className="stock-date-hint">{item.last_counted_at ? new Date(item.last_counted_at).toLocaleDateString("pt-BR") : "Nunca contado"}</small></span><span className={Number(item.last_variance_quantity) < 0 ? "negative" : ""}>{item.last_variance_quantity === null ? "—" : `${Number(item.last_variance_quantity) > 0 ? "+" : ""}${NUMBER.format(Number(item.last_variance_quantity))}`}{item.variance_value !== null && <small className="stock-date-hint">{MONEY.format(Math.abs(Number(item.variance_value)))}</small>}</span><span>{item.unit_cost === null ? "—" : MONEY.format(Number(item.unit_cost))}</span><strong>{item.stock_value === null ? "—" : MONEY.format(Number(item.stock_value))}</strong><button type="button" className="stock-minimum-button" onClick={() => setMinimumItem(item)}>{NUMBER.format(Number(item.minimum_stock))} <Pencil size={12} /></button><span><small className={`stock-status ${item.status}`}>{STOCK_STATUS_LABELS[item.status]}</small></span></div>) : <EmptyMini text="Nenhum item encontrado com estes filtros." />}</div></div></>}
     {tab === "movements" && <StockMovementHistory rows={stock.movements} />}
-    {tab === "inventories" && <StockInventoryHistory rows={stock.inventories} onNew={() => setInventoryOpen(true)} />}
+    {tab === "inventories" && <StockInventoryHistory businessId={props.businessId} rows={stock.inventories} onNew={() => setInventoryOpen(true)} onRefresh={reloadStock} />}
     {inventoryOpen && <InventoryCountModal businessId={props.businessId} items={stock.items} onClose={() => setInventoryOpen(false)} onSaved={async () => { await reloadStock(); setInventoryOpen(false); }} />}
     {movementOpen && <StockMovementModal businessId={props.businessId} items={stock.items} onClose={() => setMovementOpen(false)} onSaved={async () => { await reloadStock(); setMovementOpen(false); }} />}
     {minimumItem && <StockMinimumModal businessId={props.businessId} item={minimumItem} onClose={() => setMinimumItem(null)} onSaved={async () => { await reloadStock(); setMinimumItem(null); }} />}
@@ -1317,15 +1317,25 @@ function StockMovementHistory({ rows }: { rows: StockMovement[] }) {
   </section>;
 }
 
-function StockInventoryHistory({ rows, onNew }: { rows: StockInventory[]; onNew: () => void }) {
+function StockInventoryHistory({ businessId, rows, onNew, onRefresh }: { businessId: string; rows: StockInventory[]; onNew: () => void; onRefresh: () => Promise<void> }) {
   const [detail, setDetail] = useState<StockInventory | null>(null);
+  const [editing, setEditing] = useState<StockInventory | null>(null);
+  async function remove(row: StockInventory) {
+    if (!confirm("Excluir este inventário? Os ajustes de estoque gerados por ele também serão removidos, mas as vendas continuam preservadas.")) return;
+    const movementsRemoved = await supabase.from("stock_movements").delete().eq("business_id", businessId).eq("source_table", "inventory_counts").eq("source_id", row.id);
+    if (movementsRemoved.error) return alert("Não foi possível remover os ajustes de estoque deste inventário.");
+    const removed = await supabase.from("inventory_counts").delete().eq("id", row.id).eq("business_id", businessId);
+    if (removed.error) return alert("Não foi possível excluir este inventário.");
+    await onRefresh();
+  }
   return <section className="stock-history-section"><div className="stock-section-heading"><div><p>Conferência física</p><h3>Inventários concluídos</h3><span>Cada diferença permanece registrada mesmo depois de corrigir o saldo teórico.</span></div><button type="button" onClick={onNew}><Plus size={15} /> Nova contagem</button></div>
-    {rows.length ? <div className="data-table-card table-scroll"><div className="responsive-table inventory-history-table"><div className="table-row table-header"><span>Data</span><span>Itens contados</span><span>Com diferença</span><span>Valor das diferenças</span><span>Observações</span><span></span></div>{rows.map((row) => <div className="table-row" key={row.id}><span>{new Date(row.counted_at).toLocaleString("pt-BR")}</span><strong>{row.item_count}</strong><strong className={row.divergent_items > 0 ? "negative" : ""}>{row.divergent_items}</strong><strong>{MONEY.format(Number(row.variance_value))}</strong><span>{row.notes || "Sem observações"}</span><span className="row-actions"><InventoryRowMenu label={new Date(row.counted_at).toLocaleString("pt-BR")} onDetails={() => setDetail(row)} /></span></div>)}</div></div> : <div className="stock-empty-action"><ClipboardList size={25} /><h3>Nenhum inventário realizado</h3><p>A primeira contagem cria a base física do estoque sem apagar as vendas já registradas.</p><button type="button" onClick={onNew}>Começar contagem</button></div>}
+    {rows.length ? <div className="data-table-card table-scroll"><div className="responsive-table inventory-history-table"><div className="table-row table-header"><span>Data</span><span>Itens contados</span><span>Com diferença</span><span>Valor das diferenças</span><span>Observações</span><span></span></div>{rows.map((row) => <div className="table-row" key={row.id}><span>{new Date(row.counted_at).toLocaleString("pt-BR")}</span><strong>{row.item_count}</strong><strong className={row.divergent_items > 0 ? "negative" : ""}>{row.divergent_items}</strong><strong>{MONEY.format(Number(row.variance_value))}</strong><span>{row.notes || "Sem observações"}</span><span className="row-actions"><InventoryRowMenu label={new Date(row.counted_at).toLocaleString("pt-BR")} onDetails={() => setDetail(row)} onEdit={() => setEditing(row)} onDelete={() => remove(row)} /></span></div>)}</div></div> : <div className="stock-empty-action"><ClipboardList size={25} /><h3>Nenhum inventário realizado</h3><p>A primeira contagem cria a base física do estoque sem apagar as vendas já registradas.</p><button type="button" onClick={onNew}>Começar contagem</button></div>}
     {detail && <InventoryDetailModal inventory={detail} onClose={() => setDetail(null)} />}
+    {editing && <InventoryNotesModal businessId={businessId} inventory={editing} onClose={() => setEditing(null)} onSaved={async () => { await onRefresh(); setEditing(null); }} />}
   </section>;
 }
 
-function InventoryRowMenu({ label, onDetails }: { label: string; onDetails: () => void }) {
+function InventoryRowMenu({ label, onDetails, onEdit, onDelete }: { label: string; onDetails: () => void; onEdit: () => void; onDelete: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -1339,8 +1349,26 @@ function InventoryRowMenu({ label, onDetails }: { label: string; onDetails: () =
     <button className="row-action-trigger" type="button" aria-label={`Ações de ${label}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}><MoreHorizontal size={16} /></button>
     {open && <div className="row-action-popover" role="menu">
       <button type="button" role="menuitem" onClick={() => { setOpen(false); onDetails(); }}><Search size={14} /> Ver detalhes</button>
+      <button type="button" role="menuitem" onClick={() => { setOpen(false); onEdit(); }}><Pencil size={14} /> Editar</button>
+      <button type="button" role="menuitem" className="danger" onClick={() => { setOpen(false); onDelete(); }}><Trash2 size={14} /> Excluir</button>
     </div>}
   </div>;
+}
+
+function InventoryNotesModal({ businessId, inventory, onClose, onSaved }: { businessId: string; inventory: StockInventory; onClose: () => void; onSaved: () => Promise<void> }) {
+  useEscapeToClose(onClose);
+  const [notes, setNotes] = useState(inventory.notes ?? "");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  async function save(event: React.FormEvent) {
+    event.preventDefault(); setBusy(true); setMessage("");
+    const { error } = await supabase.from("inventory_counts").update({ notes: notes.trim() || null }).eq("id", inventory.id).eq("business_id", businessId);
+    if (error) { setBusy(false); return setMessage("Não foi possível salvar as observações."); }
+    await onSaved();
+  }
+  return <div className="modal-backdrop" role="presentation"><form className="modal-card" role="dialog" aria-modal="true" aria-labelledby="inventory-edit-title" onSubmit={save}><button type="button" className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Conferência física</p><h2 id="inventory-edit-title">Editar {new Date(inventory.counted_at).toLocaleString("pt-BR")}</h2><p className="modal-description">A data e as quantidades contadas ficam preservadas no histórico; apenas a observação pode ser ajustada.</p>
+    <label className="modal-field"><span>Observações</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ex.: contagem realizada no fechamento" /></label>
+    {message && <p className="modal-message">{message}</p>}<div className="modal-actions"><button type="button" className="modal-secondary" onClick={onClose}>Cancelar</button><button className="modal-primary" disabled={busy}>{busy ? "Salvando..." : "Salvar"}</button></div></form></div>;
 }
 
 type InventoryCountDetail = { item_id: string; system_quantity: number; counted_quantity: number; variance_quantity: number; unit_cost: number | null; items: { name: string; consumption_unit: string } | { name: string; consumption_unit: string }[] | null };
