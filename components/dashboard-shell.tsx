@@ -117,6 +117,8 @@ function mergeNavOrder(stored: Section[] | undefined, defaults: Section[]) {
 }
 function dateLabel(value: string | null) { return value ? DATE.format(new Date(`${value}T00:00:00Z`)) : "—"; }
 function isoInSaoPaulo(date = new Date()) { const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date); const value = Object.fromEntries(parts.map((part) => [part.type, part.value])); return `${value.year}-${value.month}-${value.day}`; }
+function timeInSaoPaulo(date = new Date()) { const parts = new Intl.DateTimeFormat("en-GB", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(date); const value = Object.fromEntries(parts.map((part) => [part.type, part.value])); return `${value.hour}:${value.minute}`; }
+function dateTimeToSaoPauloIso(date: string, time: string) { return `${date}T${time || "00:00"}:00-03:00`; }
 function isoDateInSaoPaulo(value: string) { return isoInSaoPaulo(new Date(value)); }
 function shiftDate(date: string, days: number) { const value = new Date(`${date}T12:00:00Z`); value.setUTCDate(value.getUTCDate() + days); return value.toISOString().slice(0, 10); }
 function selectedRange(period: string, customStart: string, customEnd: string): DateRange { const today = isoInSaoPaulo(); const [year, month] = today.split("-").map(Number); if (period === "today") return { start: today, end: today }; if (period === "yesterday") { const yesterday = shiftDate(today, -1); return { start: yesterday, end: yesterday }; } if (period === "this_week") { const weekday = new Date(`${today}T12:00:00Z`).getUTCDay(); return { start: shiftDate(today, -(weekday === 0 ? 6 : weekday - 1)), end: today }; } if (period === "last_month") { const start = new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 10); const end = new Date(Date.UTC(year, month - 1, 0)).toISOString().slice(0, 10); return { start, end }; } if (period === "custom") return { start: customStart || today, end: customEnd || customStart || today }; return { start: `${year}-${String(month).padStart(2, "0")}-01`, end: today }; }
@@ -1330,8 +1332,8 @@ function StockInventoryHistory({ businessId, rows, onNew, onRefresh }: { busines
   }
   return <section className="stock-history-section"><div className="stock-section-heading"><div><p>Conferência física</p><h3>Inventários concluídos</h3><span>Cada diferença permanece registrada mesmo depois de corrigir o saldo teórico.</span></div><button type="button" onClick={onNew}><Plus size={15} /> Nova contagem</button></div>
     {rows.length ? <div className="data-table-card table-scroll"><div className="responsive-table inventory-history-table"><div className="table-row table-header"><span>Data</span><span>Itens contados</span><span>Com diferença</span><span>Valor das diferenças</span><span>Observações</span><span></span></div>{rows.map((row) => <div className="table-row" key={row.id}><span>{new Date(row.counted_at).toLocaleString("pt-BR")}</span><strong>{row.item_count}</strong><strong className={row.divergent_items > 0 ? "negative" : ""}>{row.divergent_items}</strong><strong>{MONEY.format(Number(row.variance_value))}</strong><span>{row.notes || "Sem observações"}</span><span className="row-actions"><InventoryRowMenu label={new Date(row.counted_at).toLocaleString("pt-BR")} onDetails={() => setDetail(row)} onEdit={() => setEditing(row)} onDelete={() => remove(row)} /></span></div>)}</div></div> : <div className="stock-empty-action"><ClipboardList size={25} /><h3>Nenhum inventário realizado</h3><p>A primeira contagem cria a base física do estoque sem apagar as vendas já registradas.</p><button type="button" onClick={onNew}>Começar contagem</button></div>}
-    {detail && <InventoryDetailModal inventory={detail} onClose={() => setDetail(null)} />}
-    {editing && <InventoryNotesModal businessId={businessId} inventory={editing} onClose={() => setEditing(null)} onSaved={async () => { await onRefresh(); setEditing(null); }} />}
+    {detail && <InventoryDetailModal businessId={businessId} inventory={detail} onClose={() => setDetail(null)} onRefresh={onRefresh} />}
+    {editing && <InventoryEditModal businessId={businessId} inventory={editing} onClose={() => setEditing(null)} onSaved={async () => { await onRefresh(); setEditing(null); }} />}
   </section>;
 }
 
@@ -1355,28 +1357,36 @@ function InventoryRowMenu({ label, onDetails, onEdit, onDelete }: { label: strin
   </div>;
 }
 
-function InventoryNotesModal({ businessId, inventory, onClose, onSaved }: { businessId: string; inventory: StockInventory; onClose: () => void; onSaved: () => Promise<void> }) {
+function InventoryEditModal({ businessId, inventory, onClose, onSaved }: { businessId: string; inventory: StockInventory; onClose: () => void; onSaved: () => Promise<void> }) {
   useEscapeToClose(onClose);
+  const initial = new Date(inventory.counted_at);
+  const [countedDate, setCountedDate] = useState(isoInSaoPaulo(initial));
+  const [countedTime, setCountedTime] = useState(timeInSaoPaulo(initial));
   const [notes, setNotes] = useState(inventory.notes ?? "");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   async function save(event: React.FormEvent) {
-    event.preventDefault(); setBusy(true); setMessage("");
-    const { error } = await supabase.from("inventory_counts").update({ notes: notes.trim() || null }).eq("id", inventory.id).eq("business_id", businessId);
-    if (error) { setBusy(false); return setMessage("Não foi possível salvar as observações."); }
+    event.preventDefault();
+    if (!countedDate || !countedTime) return setMessage("Informe a data e a hora da contagem.");
+    setBusy(true); setMessage("");
+    const { error } = await supabase.rpc("update_inventory_count", { p_business_id: Number(businessId), p_id: Number(inventory.id), p_counted_at: dateTimeToSaoPauloIso(countedDate, countedTime), p_notes: notes });
+    if (error) { setBusy(false); return setMessage(error.message || "Não foi possível salvar as alterações."); }
     await onSaved();
   }
-  return <div className="modal-backdrop" role="presentation"><form className="modal-card" role="dialog" aria-modal="true" aria-labelledby="inventory-edit-title" onSubmit={save}><button type="button" className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Conferência física</p><h2 id="inventory-edit-title">Editar {new Date(inventory.counted_at).toLocaleString("pt-BR")}</h2><p className="modal-description">A data e as quantidades contadas ficam preservadas no histórico; apenas a observação pode ser ajustada.</p>
+  return <div className="modal-backdrop" role="presentation"><form className="modal-card" role="dialog" aria-modal="true" aria-labelledby="inventory-edit-title" onSubmit={save}><button type="button" className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Conferência física</p><h2 id="inventory-edit-title">Editar contagem</h2><p className="modal-description">Mudar a data/hora recalcula a diferença de cada item com base no que estava em estoque naquele momento.</p>
+    <div className="form-grid"><label><span>Data da contagem</span><input type="date" value={countedDate} max={isoInSaoPaulo()} onChange={(event) => setCountedDate(event.target.value)} /></label><label><span>Hora da contagem</span><input type="time" value={countedTime} onChange={(event) => setCountedTime(event.target.value)} /></label></div>
     <label className="modal-field"><span>Observações</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ex.: contagem realizada no fechamento" /></label>
     {message && <p className="modal-message">{message}</p>}<div className="modal-actions"><button type="button" className="modal-secondary" onClick={onClose}>Cancelar</button><button className="modal-primary" disabled={busy}>{busy ? "Salvando..." : "Salvar"}</button></div></form></div>;
 }
 
 type InventoryCountDetail = { item_id: string; system_quantity: number; counted_quantity: number; variance_quantity: number; unit_cost: number | null; items: { name: string; consumption_unit: string } | { name: string; consumption_unit: string }[] | null };
 
-function InventoryDetailModal({ inventory, onClose }: { inventory: StockInventory; onClose: () => void }) {
+function InventoryDetailModal({ businessId, inventory, onClose, onRefresh }: { businessId: string; inventory: StockInventory; onClose: () => void; onRefresh: () => Promise<void> }) {
   useEscapeToClose(onClose);
   const [rows, setRows] = useState<InventoryCountDetail[] | null>(null);
   const [error, setError] = useState("");
+  const [edits, setEdits] = useState<Record<string, string>>({});
+  const [savingId, setSavingId] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
     async function load() {
@@ -1388,21 +1398,33 @@ function InventoryDetailModal({ inventory, onClose }: { inventory: StockInventor
     void load();
     return () => { cancelled = true; };
   }, [inventory.id]);
-  return <div className="modal-backdrop" role="presentation"><div className="modal-card inventory-detail-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-detail-title"><button className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Conferência física</p><h2 id="inventory-detail-title">{new Date(inventory.counted_at).toLocaleString("pt-BR")}</h2><p className="modal-description">{inventory.notes || "Sem observações"}</p>
+  async function saveItem(itemId: string) {
+    const value = edits[itemId];
+    if (value === undefined || value === "" || Number(value) < 0) return;
+    setSavingId(itemId);
+    const { error: rpcError } = await supabase.rpc("update_inventory_count_item", { p_business_id: Number(businessId), p_inventory_count_id: Number(inventory.id), p_item_id: Number(itemId), p_counted_quantity: Number(value) });
+    if (rpcError) { setSavingId(null); setError("Não foi possível salvar esta quantidade."); return; }
+    const { data, error: fetchError } = await supabase.from("inventory_count_items").select("item_id,system_quantity,counted_quantity,variance_quantity,unit_cost,items(name,consumption_unit)").eq("inventory_count_id", inventory.id).order("item_id");
+    setSavingId(null);
+    if (!fetchError) setRows((data as InventoryCountDetail[] | null) ?? []);
+    setEdits((current) => { const next = { ...current }; delete next[itemId]; return next; });
+    await onRefresh();
+  }
+  return <div className="modal-backdrop" role="presentation"><div className="modal-card inventory-detail-modal" role="dialog" aria-modal="true" aria-labelledby="inventory-detail-title"><button className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Conferência física</p><h2 id="inventory-detail-title">{new Date(inventory.counted_at).toLocaleString("pt-BR")}</h2><p className="modal-description">{inventory.notes || "Sem observações"} · Ajuste a quantidade contada de um item e salve para corrigir a diferença.</p>
     {error && <p className="modal-message">{error}</p>}
     {!error && !rows && <p className="modal-help">Carregando itens contados...</p>}
-    {rows && (rows.length ? <div className="inventory-detail-list"><div className="inventory-detail-row header"><span>Item</span><span>Teórico</span><span>Contado</span><span>Diferença</span></div>{rows.map((row) => { const item = nested(row.items); const variance = Number(row.variance_quantity); return <div className="inventory-detail-row" key={row.item_id}><strong>{item?.name ?? "Item removido"}</strong><span>{NUMBER.format(Number(row.system_quantity))} {item?.consumption_unit}</span><span>{NUMBER.format(Number(row.counted_quantity))} {item?.consumption_unit}</span><span className={variance < 0 ? "negative" : ""}>{variance > 0 ? "+" : ""}{NUMBER.format(variance)} {item?.consumption_unit}</span></div>; })}</div> : <p className="modal-help">Nenhum item contado neste inventário.</p>)}
+    {rows && (rows.length ? <div className="inventory-detail-list"><div className="inventory-detail-row header"><span>Item</span><span>Teórico</span><span>Contado</span><span>Diferença</span><span></span></div>{rows.map((row) => { const item = nested(row.items); const variance = Number(row.variance_quantity); const editValue = edits[row.item_id]; const changed = editValue !== undefined && Number(editValue) !== Number(row.counted_quantity); return <div className="inventory-detail-row" key={row.item_id}><strong>{item?.name ?? "Item removido"}</strong><span>{NUMBER.format(Number(row.system_quantity))} {item?.consumption_unit}</span><span><input type="number" min="0" step="0.0001" value={editValue ?? String(row.counted_quantity)} onChange={(event) => setEdits((current) => ({ ...current, [row.item_id]: event.target.value }))} aria-label={`Quantidade contada de ${item?.name ?? "item"}`} /></span><span className={variance < 0 ? "negative" : ""}>{variance > 0 ? "+" : ""}{NUMBER.format(variance)} {item?.consumption_unit}</span><span><button type="button" className="inventory-detail-save" disabled={!changed || savingId === row.item_id} onClick={() => saveItem(row.item_id)}>{savingId === row.item_id ? "..." : "Salvar"}</button></span></div>; })}</div> : <p className="modal-help">Nenhum item contado neste inventário.</p>)}
   </div></div>;
 }
 
 function ModalShell({ title, subtitle, onClose, children }: { title: string; subtitle: string; onClose: () => void; children: React.ReactNode }) { useEscapeToClose(onClose); return <div className="modal-backdrop" role="presentation"><div className="modal-card stock-modal" role="dialog" aria-modal="true" aria-label={title}><button type="button" className="modal-close" onClick={onClose} aria-label="Fechar"><X size={19} /></button><p className="page-kicker">Estoque</p><h2>{title}</h2><p className="modal-description">{subtitle}</p>{children}</div></div>; }
 
 function InventoryCountModal({ businessId, items, onClose, onSaved }: { businessId: string; items: StockItem[]; onClose: () => void; onSaved: () => Promise<void> }) {
-  const [query, setQuery] = useState(""); const [counts, setCounts] = useState<Record<string, string>>({}); const [notes, setNotes] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
+  const [query, setQuery] = useState(""); const [counts, setCounts] = useState<Record<string, string>>({}); const [countedDate, setCountedDate] = useState(isoInSaoPaulo()); const [countedTime, setCountedTime] = useState(timeInSaoPaulo()); const [notes, setNotes] = useState(""); const [saving, setSaving] = useState(false); const [error, setError] = useState("");
   const visible = items.filter((item) => `${item.name} ${item.sku ?? ""} ${item.category}`.toLowerCase().includes(query.toLowerCase()));
   const filled = Object.entries(counts).filter(([, value]) => value !== "" && Number(value) >= 0);
-  async function save() { if (!filled.length) return setError("Informe a quantidade física de pelo menos um item."); setSaving(true); setError(""); const { error: rpcError } = await supabase.rpc("complete_inventory_count", { p_business_id: Number(businessId), p_counted_at: new Date().toISOString(), p_items: filled.map(([item_id, counted_quantity]) => ({ item_id: Number(item_id), counted_quantity: Number(counted_quantity) })), p_notes: notes }); if (rpcError) { setError(rpcError.message || "Não foi possível concluir a contagem."); setSaving(false); return; } await onSaved(); }
-  return <ModalShell title="Nova contagem física" subtitle="Informe apenas o que foi realmente encontrado. A diferença será preservada no histórico." onClose={onClose}><div className="inventory-modal-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar item para contar" /><span>{filled.length} preenchido(s)</span></div><div className="inventory-count-list"><div className="inventory-count-header"><span>Item</span><span>Teórico</span><span>Físico encontrado</span></div>{visible.map((item) => <div key={item.id}><span><strong>{item.name}</strong><small>{item.unit} · {item.sector}</small></span><b>{item.has_baseline ? NUMBER.format(Number(item.theoretical_quantity)) : "Sem base"}</b><input type="number" min="0" step="0.0001" value={counts[item.id] ?? ""} onChange={(event) => setCounts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder={`Quantidade em ${item.unit}`} aria-label={`Quantidade física de ${item.name}`} /></div>)}</div><label className="modal-field"><span>Observações da conferência</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ex.: contagem realizada no fechamento" /></label>{error && <p className="form-error">{error}</p>}<div className="modal-actions"><button type="button" className="modal-secondary" onClick={onClose}>Cancelar</button><button type="button" className="modal-primary" disabled={saving || !filled.length} onClick={save}>{saving ? "Salvando..." : `Concluir ${filled.length} contagem(ns)`}</button></div></ModalShell>;
+  async function save() { if (!filled.length) return setError("Informe a quantidade física de pelo menos um item."); if (!countedDate || !countedTime) return setError("Informe a data e a hora em que a contagem foi feita."); setSaving(true); setError(""); const { error: rpcError } = await supabase.rpc("complete_inventory_count", { p_business_id: Number(businessId), p_counted_at: dateTimeToSaoPauloIso(countedDate, countedTime), p_items: filled.map(([item_id, counted_quantity]) => ({ item_id: Number(item_id), counted_quantity: Number(counted_quantity) })), p_notes: notes }); if (rpcError) { setError(rpcError.message || "Não foi possível concluir a contagem."); setSaving(false); return; } await onSaved(); }
+  return <ModalShell title="Nova contagem física" subtitle="Informe a data e a hora reais da contagem: as vendas a partir desse momento serão descontadas automaticamente do saldo contado." onClose={onClose}><div className="form-grid"><label><span>Data da contagem</span><input type="date" value={countedDate} max={isoInSaoPaulo()} onChange={(event) => setCountedDate(event.target.value)} /></label><label><span>Hora da contagem</span><input type="time" value={countedTime} onChange={(event) => setCountedTime(event.target.value)} /></label></div><div className="inventory-modal-search"><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar item para contar" /><span>{filled.length} preenchido(s)</span></div><div className="inventory-count-list"><div className="inventory-count-header"><span>Item</span><span>Teórico</span><span>Físico encontrado</span></div>{visible.map((item) => <div key={item.id}><span><strong>{item.name}</strong><small>{item.unit} · {item.sector}</small></span><b>{item.has_baseline ? NUMBER.format(Number(item.theoretical_quantity)) : "Sem base"}</b><input type="number" min="0" step="0.0001" value={counts[item.id] ?? ""} onChange={(event) => setCounts((current) => ({ ...current, [item.id]: event.target.value }))} placeholder={`Quantidade em ${item.unit}`} aria-label={`Quantidade física de ${item.name}`} /></div>)}</div><label className="modal-field"><span>Observações da conferência</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Ex.: contagem realizada no fechamento" /></label>{error && <p className="form-error">{error}</p>}<div className="modal-actions"><button type="button" className="modal-secondary" onClick={onClose}>Cancelar</button><button type="button" className="modal-primary" disabled={saving || !filled.length} onClick={save}>{saving ? "Salvando..." : `Concluir ${filled.length} contagem(ns)`}</button></div></ModalShell>;
 }
 
 function StockMovementModal({ businessId, items, onClose, onSaved }: { businessId: string; items: StockItem[]; onClose: () => void; onSaved: () => Promise<void> }) {
