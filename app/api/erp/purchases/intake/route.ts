@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { authorizeErpApi, erpApiErrorResponse } from "@/lib/erp-api/auth";
+import { authorizeErpApi, erpApiErrorResponse, ErpApiError } from "@/lib/erp-api/auth";
 import { commitPurchaseIntake, validatePurchaseIntake, type PurchaseIntakeBody } from "@/lib/erp-api/purchase-intake";
 
 export const runtime = "nodejs";
