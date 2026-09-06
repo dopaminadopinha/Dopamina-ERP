@@ -346,6 +346,7 @@ select option { background: var(--surface-2); color: var(--text-primary); }
 
 .consumable-usage-toolbar { margin-top: 16px; }
 .consumable-usage-toolbar label { flex: 1; }
+.consumable-usage-toolbar select { min-width: 160px; height: 39px; padding: 0 11px; border: 1px solid var(--border); border-radius: 6px; color: #aaa4ae; background: var(--surface-2); font-size: 10.5px; }
 .consumable-usage-scroll { max-height: 430px; overflow: auto; scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.22) transparent; }
 .consumable-usage-table { min-width: 1100px; }
 .consumable-usage-row { min-height: 58px; padding: 8px 14px; display: grid; grid-template-columns: minmax(190px,1.35fr) 185px 135px 125px 135px 135px 175px; align-items: center; gap: 14px; border-bottom: 1px solid var(--line); color: #9a949e; font-size: 10.5px; }
