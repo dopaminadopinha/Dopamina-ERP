@@ -2230,10 +2230,19 @@ function SalesTrendChart({ rows, granularity }: { rows: SalesTrendRow[]; granula
   const latestAverage = [...movingAverages].reverse().find((value) => value !== null) ?? null;
   const groupLabel = granularity === "month" ? "mensal" : granularity === "week" ? "semanal" : "diária";
   const barWidth = Math.max(8, Math.min(54, plotWidth / Math.max(rows.length, 1) * .58));
+  const hover = useChartHover(rows, x, left, plotWidth);
+  const hoverRow = hover.index === null ? null : rows[hover.index];
   return <div className={`sales-trend-chart ${granularity === "month" ? "monthly" : ""}`}><div className="sales-trend-legend"><span><i />Faturamento</span>{granularity === "month" && <span className="average"><i />Média móvel de 3 meses</span>}</div><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby="sales-trend-title sales-trend-description"><title id="sales-trend-title">Evolução {groupLabel} do faturamento</title><desc id="sales-trend-description">Faturamento líquido agrupado por {granularity === "month" ? "mês" : granularity === "week" ? "semana" : "dia"} no período selecionado.</desc><defs><linearGradient id="sales-area-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#35d39a" stopOpacity=".22" /><stop offset="100%" stopColor="#35d39a" stopOpacity="0" /></linearGradient></defs>
     {grid.map((value) => <g key={value}><line x1={left} x2={width - right} y1={y(value)} y2={y(value)} className="chart-grid-line" /><text x={left - 10} y={y(value) + 4} textAnchor="end" className="chart-axis-label">{compact.format(value)}</text></g>)}
-    {rows.length ? granularity === "month" ? <>{rows.map((row, index) => <rect key={row.key} x={x(index) - barWidth / 2} y={y(row.revenue)} width={barWidth} height={Math.max(1, top + plotHeight - y(row.revenue))} rx="4" className={`sales-month-bar ${row.incomplete ? "incomplete" : ""}`}><title>{`${row.label}${row.incomplete ? " (parcial)" : ""} · ${MONEY.format(row.revenue)}${row.transactions === null ? "" : ` · ${NUMBER.format(row.transactions)} transações`}`}</title></rect>)}{movingAveragePoints && <polyline points={movingAveragePoints} className="sales-average-line" />}{rows.map((row, index) => movingAverages[index] === null ? null : <circle key={`average-${row.key}`} cx={x(index)} cy={y(movingAverages[index])} r="3" className="sales-average-point"><title>{`${row.label} · média móvel ${MONEY.format(movingAverages[index])}`}</title></circle>)}</> : <><polygon points={areaPoints} fill="url(#sales-area-gradient)" /><polyline points={linePoints} className="sales-trend-line" />{rows.length <= 31 ? rows.map((row, index) => <circle key={row.key} cx={x(index)} cy={y(row.revenue)} r="4" className="sales-trend-point"><title>{`${row.label} · ${MONEY.format(row.revenue)}${row.transactions === null ? "" : ` · ${NUMBER.format(row.transactions)} transações`}`}</title></circle>) : null}</> : null}
+    {rows.length ? granularity === "month" ? <>{rows.map((row, index) => <rect key={row.key} x={x(index) - barWidth / 2} y={y(row.revenue)} width={barWidth} height={Math.max(1, top + plotHeight - y(row.revenue))} rx="4" className={`sales-month-bar ${row.incomplete ? "incomplete" : ""}`} />)}{movingAveragePoints && <polyline points={movingAveragePoints} className="sales-average-line" />}{rows.map((row, index) => movingAverages[index] === null ? null : <circle key={`average-${row.key}`} cx={x(index)} cy={y(movingAverages[index] as number)} r="3" className="sales-average-point" />)}</> : <><polygon points={areaPoints} fill="url(#sales-area-gradient)" /><polyline points={linePoints} className="sales-trend-line" />{rows.length <= 31 ? rows.map((row, index) => <circle key={row.key} cx={x(index)} cy={y(row.revenue)} r="4" className="sales-trend-point" />) : null}</> : null}
     {labelIndexes.map((index) => <text key={rows[index]?.key ?? index} x={x(index)} y={height - 10} textAnchor="middle" className="chart-axis-label">{rows[index]?.shortLabel ?? ""}</text>)}
+    <rect x={left} y={top} width={plotWidth} height={plotHeight} fill="transparent" onMouseMove={hover.onMove} onMouseLeave={hover.onLeave} />
+    {hoverRow && <ChartTooltip x={x(hover.index as number)} chartWidth={width} left={left} right={right} top={top} bottom={plotHeight + top}>
+      <strong>{hoverRow.label}{hoverRow.incomplete ? " (parcial)" : ""}</strong>
+      <span className="revenue">Faturamento <b>{MONEY.format(hoverRow.revenue)}</b></span>
+      {hoverRow.transactions !== null && <span>Transações <b>{NUMBER.format(hoverRow.transactions)}</b></span>}
+      {granularity === "month" && movingAverages[hover.index as number] !== null && <span className="result">Média móvel <b>{MONEY.format(movingAverages[hover.index as number] as number)}</b></span>}
+    </ChartTooltip>}
   </svg>{granularity === "month" && latest ? <div className="sales-trend-reading"><div><span>Último mês exibido</span><strong>{latest.label}{latest.incomplete ? " (parcial)" : ""}</strong></div><div><span>Variação sobre o anterior</span><strong className={latestChange === null ? "" : latestChange >= 0 ? "positive" : "negative"}>{latest.incomplete ? "Disponível ao fechar o mês" : latestChange === null ? "Sem comparação" : `${latestChange >= 0 ? "+" : ""}${NUMBER.format(latestChange * 100)}%`}</strong></div><div><span>Média móvel completa</span><strong>{latestAverage === null ? "—" : MONEY.format(latestAverage)}</strong></div></div> : null}</div>;
 }
 function ExpenseKpi({ label, value, note, tone }: { label: string; value: string; note: string; tone: "neutral" | "green" | "yellow" | "red" }) { return <article className={`expense-kpi ${tone}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>; }
@@ -2250,11 +2259,19 @@ function OperationalCostChart({ rows }: { rows: OperationalCostDay[] }) {
   const grid = Array.from({ length: 4 }, (_, index) => max - max * index / 3);
   const labelIndexes = [...new Set(Array.from({ length: Math.min(5, rows.length) }, (_, index) => Math.round(index * (rows.length - 1) / Math.max(1, Math.min(5, rows.length) - 1))))];
   const compact = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 });
+  const hover = useChartHover(rows, x, left, plotWidth);
+  const hoverRow = hover.index === null ? null : rows[hover.index];
   return <div className="operational-cost-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby="operational-chart-title operational-chart-description"><title id="operational-chart-title">Evolução diária das despesas</title><desc id="operational-chart-description">Compara o valor lançado em cada dia com o custo operacional após o rateio de recorrências.</desc>
     {grid.map((value) => <g key={value}><line x1={left} x2={width - right} y1={y(value)} y2={y(value)} className="chart-grid-line" /><text x={left - 10} y={y(value) + 4} textAnchor="end" className="chart-axis-label">{compact.format(value)}</text></g>)}
     <polyline points={bookedPoints} className="expense-booked-line" /><polyline points={operationalPoints} className="expense-operational-line" />
-    {rows.length <= 31 ? rows.map((row, index) => <g key={row.date}><circle cx={x(index)} cy={y(row.booked)} r="3.5" className="expense-booked-point"><title>{`${dateLabel(row.date)} · lançado ${MONEY.format(row.booked)}`}</title></circle><circle cx={x(index)} cy={y(row.operational)} r="3.5" className="expense-operational-point"><title>{`${dateLabel(row.date)} · operacional ${MONEY.format(row.operational)}`}</title></circle></g>) : null}
+    {rows.length <= 31 ? rows.map((row, index) => <g key={row.date}><circle cx={x(index)} cy={y(row.booked)} r="3.5" className="expense-booked-point" /><circle cx={x(index)} cy={y(row.operational)} r="3.5" className="expense-operational-point" /></g>) : null}
     {labelIndexes.map((index) => <text key={rows[index]?.date ?? index} x={x(index)} y={height - 10} textAnchor="middle" className="chart-axis-label">{rows[index] ? dateLabel(rows[index].date).slice(0, 5) : ""}</text>)}
+    <rect x={left} y={top} width={plotWidth} height={plotHeight} fill="transparent" onMouseMove={hover.onMove} onMouseLeave={hover.onLeave} />
+    {hoverRow && <ChartTooltip x={x(hover.index as number)} chartWidth={width} left={left} right={right} top={top} bottom={plotHeight + top}>
+      <strong>{dateLabel(hoverRow.date)}</strong>
+      <span className="booked">Lançado <b>{MONEY.format(hoverRow.booked)}</b></span>
+      <span className="operational">Operacional <b>{MONEY.format(hoverRow.operational)}</b></span>
+    </ChartTooltip>}
   </svg></div>;
 }
 function SectorInsight({ label, sector, value, tone }: { label: string; sector: SectorSummary | null; value: string; tone: "green" | "yellow" | "red" }) { return <article className={`sector-insight ${tone}`}><span>{label}</span><strong>{sector?.name ?? "Sem dados"}</strong><small>{value}</small></article>; }
@@ -2288,14 +2305,48 @@ function FinancialTrendChart({ rows }: { rows: FinancialDay[] }) {
   const grid = Array.from({ length: 5 }, (_, index) => max - (max - min) * index / 4);
   const labelIndexes = [...new Set(Array.from({ length: Math.min(5, rows.length) }, (_, index) => Math.round(index * (rows.length - 1) / Math.max(1, Math.min(5, rows.length) - 1))))];
   const compact = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 });
+  const hover = useChartHover(rows, x, left, plotWidth);
+  const hoverRow = hover.index === null ? null : rows[hover.index];
   return <div className="financial-trend"><div className="finance-chart-legend"><span className="revenue"><i />Faturamento</span><span className="expenses"><i />Despesas</span><span className="result"><i />Resultado</span></div><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby="financial-chart-title financial-chart-description"><title id="financial-chart-title">Evolução financeira diária</title><desc id="financial-chart-description">Linhas de faturamento, despesas e resultado para cada dia do período selecionado.</desc>
     {grid.map((value) => <g key={value}><line x1={left} x2={width - right} y1={y(value)} y2={y(value)} className="chart-grid-line" /><text x={left - 10} y={y(value) + 4} textAnchor="end" className="chart-axis-label">{compact.format(value)}</text></g>)}
     {min < 0 && <line x1={left} x2={width - right} y1={y(0)} y2={y(0)} className="chart-zero-line" />}
     {rows.length > 0 && <><polyline points={points("revenue")} className="trend-line revenue" /><polyline points={points("expenses")} className="trend-line expenses" /><polyline points={points("result")} className="trend-line result" />
-      {rows.length <= 31 && rows.map((row, index) => <g key={row.date}><circle cx={x(index)} cy={y(row.revenue)} r="3.5" className="trend-point revenue"><title>{`${dateLabel(row.date)} · faturamento ${MONEY.format(row.revenue)}`}</title></circle><circle cx={x(index)} cy={y(row.expenses)} r="3.5" className="trend-point expenses"><title>{`${dateLabel(row.date)} · despesas ${MONEY.format(row.expenses)}`}</title></circle><circle cx={x(index)} cy={y(row.result)} r="3.5" className="trend-point result"><title>{`${dateLabel(row.date)} · resultado ${MONEY.format(row.result)}`}</title></circle></g>)}
+      {rows.length <= 31 && rows.map((row, index) => <g key={row.date}><circle cx={x(index)} cy={y(row.revenue)} r="3.5" className="trend-point revenue" /><circle cx={x(index)} cy={y(row.expenses)} r="3.5" className="trend-point expenses" /><circle cx={x(index)} cy={y(row.result)} r="3.5" className="trend-point result" /></g>)}
     </>}
     {labelIndexes.map((index) => <text key={rows[index]?.date ?? index} x={x(index)} y={height - 12} textAnchor="middle" className="chart-axis-label">{rows[index] ? dateLabel(rows[index].date).slice(0, 5) : ""}</text>)}
+    <rect x={left} y={top} width={plotWidth} height={plotHeight} fill="transparent" onMouseMove={hover.onMove} onMouseLeave={hover.onLeave} />
+    {hoverRow && <ChartTooltip x={x(hover.index as number)} chartWidth={width} left={left} right={right} top={top} bottom={plotHeight + top}>
+      <strong>{dateLabel(hoverRow.date)}</strong>
+      <span className="revenue">Faturamento <b>{MONEY.format(hoverRow.revenue)}</b></span>
+      <span className="expenses">Despesas <b>{MONEY.format(hoverRow.expenses)}</b></span>
+      <span className="result">Resultado <b>{MONEY.format(hoverRow.result)}</b></span>
+    </ChartTooltip>}
   </svg></div>;
+}
+
+function useChartHover<T>(rows: T[], x: (index: number) => number, left: number, plotWidth: number) {
+  const [index, setIndex] = useState<number | null>(null);
+  function onMove(event: React.MouseEvent<SVGRectElement>) {
+    const svg = event.currentTarget.ownerSVGElement;
+    const ctm = svg?.getScreenCTM();
+    if (!svg || !ctm) return;
+    const point = svg.createSVGPoint();
+    point.x = event.clientX; point.y = event.clientY;
+    const local = point.matrixTransform(ctm.inverse());
+    const ratio = rows.length > 1 ? (local.x - left) / plotWidth : 0;
+    setIndex(Math.min(rows.length - 1, Math.max(0, Math.round(ratio * (rows.length - 1)))));
+  }
+  function onLeave() { setIndex(null); }
+  return { index, onMove, onLeave };
+}
+
+function ChartTooltip({ x, chartWidth, left, right, top, bottom, children }: { x: number; chartWidth: number; left: number; right: number; top: number; bottom: number; children: React.ReactNode }) {
+  const boxWidth = 168; const boxHeight = 92;
+  const posX = Math.min(Math.max(x - boxWidth / 2, left), chartWidth - right - boxWidth);
+  return <>
+    <line x1={x} x2={x} y1={top} y2={bottom} className="chart-hover-line" />
+    <foreignObject x={posX} y={top} width={boxWidth} height={boxHeight}><div className="chart-tooltip">{children}</div></foreignObject>
+  </>;
 }
 function EmptyMini({ text }: { text: string }) { return <div className="empty-mini"><FileSpreadsheet size={24} /><p>{text}</p></div>; }
 function StatusBadge({ status }: { status: Expense["status"] }) { const labels = { completed: "Concluído", pending: "Pendente", draft: "Rascunho", cancelled: "Cancelado" }; return <span className={`status-badge ${status}`}>{labels[status]}</span>; }
