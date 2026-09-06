@@ -60,6 +60,10 @@ type StockItem = { id: string; name: string; sku: string | null; category: strin
 type StockMovement = { movement_key: string; occurred_at: string; item_id: string; name: string; sector: string; movement_type: string; quantity: number; unit: string; unit_cost: number | null; origin: string; balance_before: number | null; balance_after: number | null };
 type StockInventory = { id: string; counted_at: string; notes: string | null; item_count: number; variance_value: number; divergent_items: number };
 type StockDashboard = { period_start: string; period_end: string; summary: { stock_value: number; below_minimum: number; out_of_stock: number; divergent_items: number; variance_value: number; loss_value: number; replenishment_items: number; last_inventory_at: string | null; insufficient_items: number }; items: StockItem[]; movements: StockMovement[]; inventories: StockInventory[]; missing_recipes: { item_id: string; name: string; quantity: number }[] };
+type ConsumableUsageStatus = "known" | "insufficient" | "review";
+type ConsumableUsage = { itemId: string; name: string; unit: string; countCount: number; intervalCount: number; invalidIntervals: number; firstCountedAt: string | null; lastCountedAt: string | null; totalConsumption: number | null; totalDays: number | null; dailyAverage: number | null; weeklyAverage: number | null; monthlyAverage: number | null; status: ConsumableUsageStatus };
+type InventoryCountUsageRow = { item_id: string | number; counted_quantity: number | string; inventory_counts: { counted_at: string } | { counted_at: string }[] };
+type PurchaseReceiptUsageRow = { item_id: string | number; quantity: number | string; purchase_receipts: { received_at: string } | { received_at: string }[] };
 type DateRange = { start: string; end: string };
 type DataState = { sales: Sale[]; saleItems: SaleItem[]; payments: PaymentMethod[]; expenses: Expense[]; feeRates: BusinessFeeRate[]; forecasts: Forecast[]; catalogItems: CatalogItem[]; ingredients: CatalogItem[]; costHistory: CostHistory[]; recipes: Recipe[]; recipeItems: RecipeItem[]; imports: ImportRow[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; abcImports: AbcImport[]; abcItems: AbcItem[]; zig: ZigDashboard; previousZig: ZigDashboard; sectorProfitability: SectorProfitability; previousSectorProfitability: SectorProfitability; stock: StockDashboard; products: number; suppliers: number; areas: Area[] };
 
@@ -94,7 +98,7 @@ const DEFAULT_NAV_ORDER: NavOrder = {
 };
 const SIDEBAR_ORDER_KEY = "dopamina:sidebar-order:v1";
 const SECTION_TABS = NAV_ITEMS.map((item) => item.id);
-const STOCK_TABS = ["stock", "movements", "inventories"] as const;
+const STOCK_TABS = ["stock", "movements", "inventories", "consumption"] as const;
 const CATALOG_TABS = ["products", "ingredients", "consumables", "areas"] as const;
 
 function nested<T>(value: T | T[] | null | undefined): T | null { return Array.isArray(value) ? value[0] ?? null : value ?? null; }
@@ -1299,7 +1303,7 @@ const STOCK_STATUS_LABELS: Record<StockStatus, string> = { normal: "Normal", low
 const STOCK_REASON_LABELS: Record<string, string> = { purchase: "Compra / entrada", other_in: "Outra entrada", sale: "Venda Zig", recipe_consumption: "Consumo por ficha", inventory_correction: "Correção de inventário", breakage: "Quebra", waste: "Desperdício", expiration: "Vencimento", courtesy: "Cortesia", internal_consumption: "Consumo interno", operational_error: "Erro operacional", loss: "Perda", other_out: "Outra saída" };
 
 function StockPage(props: Parameters<typeof SectionContent>[0]) {
-  const [tab, setTab] = usePersistedTab<"stock" | "movements" | "inventories">("dopamina:stock-tab", "stock", STOCK_TABS);
+  const [tab, setTab] = usePersistedTab<"stock" | "movements" | "inventories" | "consumption">("dopamina:stock-tab", "stock", STOCK_TABS);
   const [query, setQuery] = useState("");
   const [sector, setSector] = useState("all");
   const [category, setCategory] = useState("all");
@@ -1311,6 +1315,10 @@ function StockPage(props: Parameters<typeof SectionContent>[0]) {
   const [stock, setStock] = useState<StockDashboard>(props.data.stock);
   const [stockLoading, setStockLoading] = useState(true);
   const [stockError, setStockError] = useState("");
+  const [consumptionQuery, setConsumptionQuery] = useState("");
+  const [consumableUsage, setConsumableUsage] = useState<ConsumableUsage[]>([]);
+  const [consumptionLoading, setConsumptionLoading] = useState(false);
+  const [consumptionError, setConsumptionError] = useState("");
   async function reloadStock() {
     setStockLoading(true); setStockError("");
     const { data, error } = await supabase.rpc("get_virtual_inventory_dashboard", { p_business_id: Number(props.businessId), p_period_start: props.range.start, p_period_end: props.range.end });
@@ -1331,6 +1339,27 @@ function StockPage(props: Parameters<typeof SectionContent>[0]) {
     void load();
     return () => { cancelled = true; };
   }, [props.businessId, props.range.start, props.range.end]);
+  useEffect(() => {
+    if (tab !== "consumption") return;
+    let cancelled = false;
+    async function loadConsumption() {
+      setConsumptionLoading(true); setConsumptionError("");
+      const [{ data: countData, error: countError }, { data: receiptData, error: receiptError }] = await Promise.all([
+        supabase.from("inventory_count_items").select("item_id,counted_quantity,inventory_counts!inner(counted_at,status,business_id)").eq("inventory_counts.business_id", Number(props.businessId)).eq("inventory_counts.status", "completed"),
+        supabase.from("purchase_receipt_items").select("item_id,quantity,purchase_receipts!inner(received_at,business_id)").eq("purchase_receipts.business_id", Number(props.businessId)),
+      ]);
+      if (cancelled) return;
+      if (countError || receiptError) {
+        setConsumptionError("Não foi possível calcular o consumo médio agora.");
+        setConsumableUsage([]);
+      } else {
+        setConsumableUsage(calculateConsumableUsage(stock.items, (countData ?? []) as InventoryCountUsageRow[], (receiptData ?? []) as PurchaseReceiptUsageRow[]));
+      }
+      setConsumptionLoading(false);
+    }
+    void loadConsumption();
+    return () => { cancelled = true; };
+  }, [tab, props.businessId, stock.items]);
   const sectors = [...new Set(stock.items.map((item) => item.sector))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   const categories = [...new Set(stock.items.map((item) => item.category))].sort((a, b) => a.localeCompare(b, "pt-BR"));
   const rows = stock.items.filter((item) => {
@@ -1349,12 +1378,13 @@ function StockPage(props: Parameters<typeof SectionContent>[0]) {
     <div className="stock-kpi-grid"><StockKpi label="Valor do estoque" value={MONEY.format(Number(stock.summary.stock_value))} note={`${stock.summary.insufficient_items} item(ns) aguardam saldo inicial`} tone="green" /><StockKpi label="Abaixo do mínimo" value={String(stock.summary.below_minimum)} note="Itens baixos ou abaixo do limite" tone="yellow" /><StockKpi label="Sem estoque" value={String(stock.summary.out_of_stock)} note="Somente itens com base confiável" tone="red" /><StockKpi label="Com divergência" value={String(stock.summary.divergent_items)} note={MONEY.format(Number(stock.summary.variance_value)) + " no período"} tone="red" /><StockKpi label="Perdas registradas" value={MONEY.format(Number(stock.summary.loss_value))} note="Quebras, desperdícios e perdas" tone="yellow" /><StockKpi label="Possível reposição" value={String(stock.summary.replenishment_items)} note="Estimativa com histórico suficiente" tone="blue" /><StockKpi label="Último inventário" value={stock.summary.last_inventory_at ? new Date(stock.summary.last_inventory_at).toLocaleDateString("pt-BR") : "Ainda não feito"} note="Última conferência física" tone="neutral" /></div>
     {stock.summary.insufficient_items > 0 && <DismissibleNotice noticeKey="estoque-saldo-inicial" className="data-warning stock-warning"><TriangleAlert size={18} /><div><strong>{stock.summary.insufficient_items} item(ns) ainda não possuem saldo inicial confiável</strong><span>Registre uma compra/entrada ou faça a primeira contagem física. As vendas já aparecem no consumo, mas o ERP não inventa quanto havia no estoque.</span></div><button type="button" onClick={() => setInventoryOpen(true)}>Fazer inventário</button></DismissibleNotice>}
     {stock.missing_recipes.length > 0 && <DismissibleNotice noticeKey="estoque-fichas-ausentes"><TriangleAlert size={18} /><div><strong>{stock.missing_recipes.length} produto(s) vendido(s) sem ficha válida</strong><span>O consumo dos ingredientes não foi estimado. Complete as fichas técnicas no cadastro.</span></div></DismissibleNotice>}
-    <div className="stock-tabs" role="tablist" aria-label="Visões do estoque"><button type="button" role="tab" aria-selected={tab === "stock"} className={tab === "stock" ? "active" : ""} onClick={() => setTab("stock")}><Boxes size={16} /> Estoque atual</button><button type="button" role="tab" aria-selected={tab === "movements"} className={tab === "movements" ? "active" : ""} onClick={() => setTab("movements")}><Clock3 size={16} /> Movimentações</button><button type="button" role="tab" aria-selected={tab === "inventories"} className={tab === "inventories" ? "active" : ""} onClick={() => setTab("inventories")}><ClipboardList size={16} /> Inventários</button></div>
+    <div className="stock-tabs" role="tablist" aria-label="Visões do estoque"><button type="button" role="tab" aria-selected={tab === "stock"} className={tab === "stock" ? "active" : ""} onClick={() => setTab("stock")}><Boxes size={16} /> Estoque atual</button><button type="button" role="tab" aria-selected={tab === "movements"} className={tab === "movements" ? "active" : ""} onClick={() => setTab("movements")}><Clock3 size={16} /> Movimentações</button><button type="button" role="tab" aria-selected={tab === "inventories"} className={tab === "inventories" ? "active" : ""} onClick={() => setTab("inventories")}><ClipboardList size={16} /> Inventários</button><button type="button" role="tab" aria-selected={tab === "consumption"} className={tab === "consumption" ? "active" : ""} onClick={() => setTab("consumption")}><BarChart3 size={16} /> Consumo médio</button></div>
     {tab === "stock" && <><div className="stock-management-grid"><article className="stock-panel"><div className="stock-panel-head"><div><p>Capital armazenado</p><h3>Valor por setor</h3></div><strong>{MONEY.format(Number(stock.summary.stock_value))}</strong></div>{valueBySector.length ? <div className="stock-sector-values">{valueBySector.map((row) => <div key={row.name}><span>{row.name}</span><i><em style={{ width: `${Math.min(100, row.value / Math.max(valueBySector[0].value, 1) * 100)}%` }} /></i><strong>{MONEY.format(row.value)}</strong></div>)}</div> : <EmptyMini text="O valor aparecerá após uma entrada ou inventário com custo conhecido." />}</article><article className="stock-panel"><div className="stock-panel-head"><div><p>Maior valor parado</p><h3>Itens mais valiosos</h3></div></div>{highValue.length ? <div className="stock-value-ranking">{highValue.map((item, index) => <div key={item.id}><b>{index + 1}</b><span><strong>{item.name}</strong><small>{item.sector}</small></span><em>{MONEY.format(Number(item.stock_value))}</em></div>)}</div> : <EmptyMini text="Nenhum item com saldo e custo confiáveis." />}</article><article className="stock-panel stock-replenishment"><div className="stock-panel-head"><div><p>Recomendação explicável</p><h3>Próxima sexta-feira</h3></div></div>{replenishment.length ? <div className="stock-replenishment-list">{replenishment.slice(0, 5).map((item) => <div key={item.id}><span><strong>{item.name}</strong><small>Média de {item.reference_days} sextas: {NUMBER.format(Number(item.expected_quantity))} {item.unit}</small></span><b>Comprar ~{NUMBER.format(Number(item.suggested_purchase))} {item.unit}</b></div>)}</div> : <EmptyMini text="Ainda não há histórico e saldo suficientes para sugerir compras." />}</article></div>
       <div className="module-toolbar stock-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar produto, ingrediente ou SKU" /></label><select value={sector} onChange={(event) => setSector(event.target.value)} aria-label="Filtrar estoque por setor"><option value="all">Todos os setores</option>{sectors.map((value) => <option key={value}>{value}</option>)}</select><select value={category} onChange={(event) => setCategory(event.target.value)} aria-label="Filtrar estoque por categoria"><option value="all">Todas as categorias</option>{categories.map((value) => <option key={value}>{value}</option>)}</select><select value={itemType} onChange={(event) => setItemType(event.target.value)} aria-label="Filtrar por tipo de item"><option value="all">Todos os tipos</option><option value="product">Produtos</option><option value="ingredient">Ingredientes</option><option value="consumable">Consumíveis</option></select><select value={status} onChange={(event) => setStatus(event.target.value)} aria-label="Filtrar por situação"><option value="all">Todas as situações</option>{Object.entries(STOCK_STATUS_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select><span className="table-count">{rows.length} item(ns)</span></div>
       <div className="data-table-card stock-scroll-table"><div className="responsive-table stock-current-table"><div className="table-row table-header"><span>Item</span><span>Setor</span><span>Unidade</span><span>Teórico</span><span>Saída no período</span><span>Último físico</span><span>Divergência</span><span>Custo unit.</span><span>Valor atual</span><span>Mínimo</span><span>Situação</span></div>{rows.length ? rows.map((item) => <div className="table-row" key={item.id}><strong>{item.name}<small className="sku-hint">{item.category} · {item.item_type === "product" ? "Produto" : item.item_type === "ingredient" ? "Ingrediente" : "Consumível"}</small></strong><span>{item.sector}</span><span>{item.unit}</span><strong>{item.has_baseline ? NUMBER.format(Number(item.theoretical_quantity)) : "—"}</strong><strong>{NUMBER.format(consumedByItem.get(String(item.id)) ?? Number(item.consumed_period ?? 0))} {item.unit}</strong><span>{item.physical_quantity === null ? "—" : NUMBER.format(Number(item.physical_quantity))}<small className="stock-date-hint">{item.last_counted_at ? new Date(item.last_counted_at).toLocaleDateString("pt-BR") : "Nunca contado"}</small></span><span className={Number(item.last_variance_quantity) < 0 ? "negative" : ""}>{item.last_variance_quantity === null ? "—" : `${Number(item.last_variance_quantity) > 0 ? "+" : ""}${NUMBER.format(Number(item.last_variance_quantity))}`}{item.variance_value !== null && <small className="stock-date-hint">{MONEY.format(Math.abs(Number(item.variance_value)))}</small>}</span><span>{item.unit_cost === null ? "—" : MONEY.format(Number(item.unit_cost))}</span><strong>{item.stock_value === null ? "—" : MONEY.format(Number(item.stock_value))}</strong><button type="button" className="stock-minimum-button" onClick={() => setMinimumItem(item)}>{NUMBER.format(Number(item.minimum_stock))} <Pencil size={12} /></button><span><small className={`stock-status ${item.status}`}>{STOCK_STATUS_LABELS[item.status]}</small></span></div>) : <EmptyMini text="Nenhum item encontrado com estes filtros." />}</div></div></>}
     {tab === "movements" && <StockMovementHistory rows={stock.movements} />}
     {tab === "inventories" && <StockInventoryHistory businessId={props.businessId} rows={stock.inventories} onNew={() => setInventoryOpen(true)} onRefresh={reloadStock} />}
+    {tab === "consumption" && <ConsumableUsageList rows={consumableUsage} query={consumptionQuery} onQueryChange={setConsumptionQuery} loading={consumptionLoading} error={consumptionError} onInventory={() => setInventoryOpen(true)} />}
     {inventoryOpen && <InventoryCountModal businessId={props.businessId} items={stock.items} onClose={() => setInventoryOpen(false)} onSaved={async () => { await reloadStock(); setInventoryOpen(false); }} />}
     {movementOpen && <StockMovementModal businessId={props.businessId} items={stock.items} onClose={() => setMovementOpen(false)} onSaved={async () => { await reloadStock(); setMovementOpen(false); }} />}
     {minimumItem && <StockMinimumModal businessId={props.businessId} item={minimumItem} onClose={() => setMinimumItem(null)} onSaved={async () => { await reloadStock(); setMinimumItem(null); }} />}
@@ -1362,6 +1392,72 @@ function StockPage(props: Parameters<typeof SectionContent>[0]) {
 }
 
 function StockKpi({ label, value, note, tone }: { label: string; value: string; note: string; tone: "green" | "yellow" | "red" | "blue" | "neutral" }) { return <article className={`stock-kpi ${tone}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>; }
+
+function calculateConsumableUsage(items: StockItem[], countRows: InventoryCountUsageRow[], receiptRows: PurchaseReceiptUsageRow[]): ConsumableUsage[] {
+  const countsByItem = new Map<string, { at: string; quantity: number }[]>();
+  const receiptsByItem = new Map<string, { at: string; quantity: number }[]>();
+  countRows.forEach((row) => {
+    const parent = nested(row.inventory_counts);
+    if (!parent) return;
+    const key = String(row.item_id);
+    countsByItem.set(key, [...(countsByItem.get(key) ?? []), { at: parent.counted_at, quantity: Number(row.counted_quantity) }]);
+  });
+  receiptRows.forEach((row) => {
+    const parent = nested(row.purchase_receipts);
+    if (!parent) return;
+    const key = String(row.item_id);
+    receiptsByItem.set(key, [...(receiptsByItem.get(key) ?? []), { at: parent.received_at, quantity: Number(row.quantity) }]);
+  });
+  return items.filter((item) => item.item_type === "consumable").map((item) => {
+    const counts = (countsByItem.get(String(item.id)) ?? []).sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
+    let totalConsumption = 0;
+    let totalDays = 0;
+    let intervalCount = 0;
+    let invalidIntervals = 0;
+    for (let index = 1; index < counts.length; index += 1) {
+      const previous = counts[index - 1];
+      const current = counts[index];
+      const previousTime = new Date(previous.at).getTime();
+      const currentTime = new Date(current.at).getTime();
+      const purchases = (receiptsByItem.get(String(item.id)) ?? []).filter((receipt) => {
+        const receiptTime = new Date(receipt.at).getTime();
+        return receiptTime > previousTime && receiptTime <= currentTime;
+      }).reduce((sum, receipt) => sum + receipt.quantity, 0);
+      const measuredConsumption = previous.quantity + purchases - current.quantity;
+      if (measuredConsumption < -0.0001) {
+        invalidIntervals += 1;
+        continue;
+      }
+      const previousDay = new Date(`${isoDateInSaoPaulo(previous.at)}T00:00:00Z`).getTime();
+      const currentDay = new Date(`${isoDateInSaoPaulo(current.at)}T00:00:00Z`).getTime();
+      totalDays += Math.max(1, Math.round((currentDay - previousDay) / 86400000));
+      totalConsumption += Math.max(0, measuredConsumption);
+      intervalCount += 1;
+    }
+    const hasAverage = intervalCount > 0 && totalDays > 0;
+    const dailyAverage = hasAverage ? totalConsumption / totalDays : null;
+    const usageStatus: ConsumableUsageStatus = counts.length < 2 ? "insufficient" : invalidIntervals > 0 ? "review" : "known";
+    return {
+      itemId: String(item.id), name: item.name, unit: item.unit, countCount: counts.length, intervalCount, invalidIntervals,
+      firstCountedAt: counts[0]?.at ?? null, lastCountedAt: counts.at(-1)?.at ?? null,
+      totalConsumption: hasAverage ? totalConsumption : null, totalDays: hasAverage ? totalDays : null,
+      dailyAverage, weeklyAverage: dailyAverage === null ? null : dailyAverage * 7, monthlyAverage: dailyAverage === null ? null : dailyAverage * 30,
+      status: usageStatus,
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+}
+
+function ConsumableUsageList({ rows, query, onQueryChange, loading, error, onInventory }: { rows: ConsumableUsage[]; query: string; onQueryChange: (value: string) => void; loading: boolean; error: string; onInventory: () => void }) {
+  const normalizedQuery = query.trim().toLocaleLowerCase("pt-BR");
+  const filtered = rows.filter((row) => row.name.toLocaleLowerCase("pt-BR").includes(normalizedQuery));
+  const insufficient = rows.filter((row) => row.status === "insufficient").length;
+  return <article className="stock-history-section consumable-usage-section">
+    <div className="stock-section-heading"><div><p>Consumo sem venda</p><h3>Consumo médio dos consumíveis</h3><span>A média usa contagens físicas consecutivas e soma somente compras já recebidas entre elas.</span></div><button type="button" onClick={onInventory}><Plus size={15} /> Nova contagem</button></div>
+    <div className="module-toolbar consumable-usage-toolbar"><label><Search size={16} /><input value={query} onChange={(event) => onQueryChange(event.target.value)} placeholder="Buscar papel higiênico, detergente, copo..." /></label><span className="table-count">{filtered.length} item(ns) · {insufficient} sem dados suficientes</span></div>
+    {loading ? <p className="stock-loading"><Clock3 size={15} />Calculando os intervalos entre contagens...</p> : error ? <DismissibleNotice noticeKey="consumo-medio-erro"><TriangleAlert size={18} /><div><strong>{error}</strong><span>Nenhuma média foi estimada.</span></div></DismissibleNotice> : <div className="data-table-card consumable-usage-scroll"><div className="consumable-usage-table"><div className="consumable-usage-row header"><span>Produto</span><span>Período medido</span><span>Consumo medido</span><span>Média / dia</span><span>Média / semana</span><span>Média / mês</span><span>Situação</span></div>{filtered.length ? filtered.map((row) => <div className="consumable-usage-row" key={row.itemId}><strong>{row.name}<small>{row.unit} · {row.countCount} contagem(ns)</small></strong><span>{row.firstCountedAt && row.lastCountedAt && row.countCount >= 2 ? `${new Date(row.firstCountedAt).toLocaleDateString("pt-BR")} a ${new Date(row.lastCountedAt).toLocaleDateString("pt-BR")}` : "—"}<small>{row.totalDays ? `${row.totalDays} dia(s) · ${row.intervalCount} intervalo(s)` : ""}</small></span><span>{row.totalConsumption === null ? "—" : `${NUMBER.format(row.totalConsumption)} ${row.unit}`}</span><strong>{row.dailyAverage === null ? "—" : `${NUMBER.format(row.dailyAverage)} ${row.unit}`}</strong><strong>{row.weeklyAverage === null ? "—" : `${NUMBER.format(row.weeklyAverage)} ${row.unit}`}</strong><strong>{row.monthlyAverage === null ? "—" : `${NUMBER.format(row.monthlyAverage)} ${row.unit}`}</strong><span>{row.status === "insufficient" ? <small className="usage-status insufficient">Dados insuficientes</small> : row.status === "review" ? <small className="usage-status review">Revisar contagens</small> : <small className="usage-status known">Calculado</small>}{row.status === "insufficient" && <small className="usage-status-note">Faça pelo menos 2 contagens físicas.</small>}{row.status === "review" && <small className="usage-status-note">{row.invalidIntervals} intervalo(s) inconsistente(s) ignorado(s).</small>}</span></div>) : <div className="consumable-usage-empty"><PackageSearch size={22} /><strong>Nenhum consumível encontrado</strong><span>Cadastre o item como Consumível ou ajuste a busca.</span></div>}</div></div>}
+    <p className="consumable-usage-footnote">Mês = 30 dias. Compras sem uma contagem física posterior permanecem fora do cálculo.</p>
+  </article>;
+}
 
 type GroupedStockMovement = StockMovement & { day: string; entryCount: number };
 
