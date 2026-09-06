@@ -380,10 +380,41 @@ function ModuleHero({ eyebrow, title, description, action, icon, onAction }: { e
 }
 
 type FinancialDay = { date: string; revenue: number; expenses: number; result: number };
+type SalesGranularity = "day" | "week" | "month";
+type SalesTrendRow = { key: string; start: string; end: string; label: string; shortLabel: string; revenue: number; transactions: number | null; incomplete: boolean };
 
 function datesInRange(range: DateRange) { return Array.from({ length: rangeDays(range) }, (_, index) => shiftDate(range.start, index)); }
 function salesInRange(rows: Sale[], range: DateRange) { return rows.filter((row) => row.business_date >= range.start && row.business_date <= range.end); }
 function reportRevenue(rows: Sale[]) { return rows.reduce((sum, row) => sum + Number(row.revenue_amount ?? row.closing_net_amount ?? row.gross_amount), 0); }
+function defaultSalesGranularity(range: DateRange): SalesGranularity { const days = rangeDays(range); return days > 120 ? "month" : days > 31 ? "week" : "day"; }
+function monthName(value: string, short = false) { return new Intl.DateTimeFormat("pt-BR", { month: short ? "short" : "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}T12:00:00Z`)).replace(" de ", " ").replace(".", ""); }
+function salesPeriodKey(date: string, granularity: SalesGranularity) {
+  if (granularity === "day") return date;
+  if (granularity === "month") return date.slice(0, 7);
+  const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
+  return shiftDate(date, -(weekday === 0 ? 6 : weekday - 1));
+}
+function aggregateSalesTrend(rows: { date: string; revenue: number; transactions: number | null }[], granularity: SalesGranularity): SalesTrendRow[] {
+  const grouped = new Map<string, SalesTrendRow>();
+  rows.forEach((row) => {
+    const key = salesPeriodKey(row.date, granularity);
+    const current = grouped.get(key) ?? { key, start: row.date, end: row.date, label: "", shortLabel: "", revenue: 0, transactions: row.transactions === null ? null : 0, incomplete: false };
+    current.start = current.start < row.date ? current.start : row.date;
+    current.end = current.end > row.date ? current.end : row.date;
+    current.revenue += row.revenue;
+    current.transactions = current.transactions === null || row.transactions === null ? null : current.transactions + row.transactions;
+    grouped.set(key, current);
+  });
+  const today = isoInSaoPaulo();
+  return [...grouped.values()].sort((a, b) => a.start.localeCompare(b.start)).map((row) => {
+    if (granularity === "day") return { ...row, label: dateLabel(row.start), shortLabel: dateLabel(row.start).slice(0, 5), incomplete: row.start > today };
+    if (granularity === "week") return { ...row, label: `${dateLabel(row.start)} a ${dateLabel(row.end)}`, shortLabel: dateLabel(row.start).slice(0, 5), incomplete: rangeDays({ start: row.start, end: row.end }) < 7 || row.end > today };
+    const [year, month] = row.key.split("-").map(Number);
+    const calendarStart = `${row.key}-01`;
+    const calendarEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10);
+    return { ...row, label: monthName(row.start), shortLabel: monthName(row.start, true), incomplete: row.start !== calendarStart || row.end !== calendarEnd || row.end > today };
+  });
+}
 
 function Overview({ sales, expenses, data, setSection, range }: Parameters<typeof SectionContent>[0]) {
   const [dayOverride, setDayOverride] = useState("");
@@ -888,6 +919,10 @@ function AttentionPanel({ data, range }: { data: DataState; range: DateRange }) 
 function SalesPage(props: Parameters<typeof SectionContent>[0]) {
   const [query, setQuery] = useState("");
   const [productSort, setProductSort] = useState<"revenue" | "quantity" | "lowest">("revenue");
+  const [trendPreference, setTrendPreference] = useState<{ rangeKey: string; value: SalesGranularity } | null>(null);
+  const trendRangeKey = `${props.range.start}|${props.range.end}`;
+  const trendGranularity = trendPreference?.rangeKey === trendRangeKey ? trendPreference.value : defaultSalesGranularity(props.range);
+  const selectTrendGranularity = (value: SalesGranularity) => setTrendPreference({ rangeKey: trendRangeKey, value });
   const apiHasData = props.data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
   const gross = apiHasData ? Number(props.data.zig.summary.gross_cents) / 100 : props.sales.reduce((sum, sale) => sum + Number(sale.gross_amount), 0);
   const discounts = apiHasData ? Number(props.data.zig.summary.discount_cents) / 100 : props.sales.reduce((sum, sale) => sum + Number(sale.discount_amount), 0);
@@ -912,9 +947,13 @@ function SalesPage(props: Parameters<typeof SectionContent>[0]) {
     else props.sales.forEach((sale) => { const current = values.get(sale.business_date) ?? { revenue: 0, transactions: null }; current.revenue += Number(sale.revenue_amount ?? sale.closing_net_amount ?? sale.gross_amount); values.set(sale.business_date, current); });
     return datesInRange(props.range).map((date) => ({ date, revenue: values.get(date)?.revenue ?? 0, transactions: values.get(date)?.transactions ?? null }));
   }, [apiHasData, props.data.zig.daily, props.range, props.sales]);
+  const trendRows = useMemo(() => aggregateSalesTrend(dailyRevenue, trendGranularity), [dailyRevenue, trendGranularity]);
   const sellingDays = dailyRevenue.filter((row) => row.revenue > 0);
-  const bestDay = sellingDays.reduce<(typeof sellingDays)[number] | null>((best, row) => !best || row.revenue > best.revenue ? row : best, null);
-  const worstDay = sellingDays.reduce<(typeof sellingDays)[number] | null>((worst, row) => !worst || row.revenue < worst.revenue ? row : worst, null);
+  const sellingPeriods = trendRows.filter((row) => row.revenue > 0);
+  const comparablePeriods = trendGranularity === "month" && sellingPeriods.some((row) => !row.incomplete) ? sellingPeriods.filter((row) => !row.incomplete) : sellingPeriods;
+  const bestPeriod = comparablePeriods.reduce<SalesTrendRow | null>((best, row) => !best || row.revenue > best.revenue ? row : best, null);
+  const worstPeriod = comparablePeriods.reduce<SalesTrendRow | null>((worst, row) => !worst || row.revenue < worst.revenue ? row : worst, null);
+  const periodNoun = trendGranularity === "month" ? "mês" : trendGranularity === "week" ? "semana" : "dia";
   const areas = useMemo(() => {
     const values = new Map<string, { area: string; revenue: number; quantity: number }>();
     grouped.forEach((row) => { const current = values.get(row.area) ?? { area: row.area, revenue: 0, quantity: 0 }; current.revenue += row.net; current.quantity += row.quantity; values.set(row.area, current); });
@@ -929,7 +968,7 @@ function SalesPage(props: Parameters<typeof SectionContent>[0]) {
     {!apiHasData && props.sales.length > 0 && <div className="sales-data-note"><TriangleAlert size={15} /><span>O relatório importado não informa a quantidade de transações. Ticket médio e vendas aparecem como indisponíveis até a sincronização da Zig.</span></div>}
     <div className="sales-kpi-grid"><SalesKpi label="Faturamento líquido" value={MONEY.format(revenue)} note="Vendas após descontos" tone="green" /><SalesKpi label="Faturamento bruto" value={MONEY.format(gross)} note="Antes dos descontos" /><SalesKpi label="Itens vendidos" value={NUMBER.format(quantity)} note={`${grouped.length} produto(s) no período`} /><SalesKpi label="Vendas / transações" value={transactionCount === null ? "—" : NUMBER.format(transactionCount)} note={apiHasData ? "Transações válidas da Zig" : "Dado indisponível"} /><SalesKpi label="Ticket médio" value={averageTicket === null ? "—" : MONEY.format(averageTicket)} note="Faturamento líquido por venda" tone="purple" /><SalesKpi label="Total de descontos" value={MONEY.format(discounts)} note={gross > 0 ? `${NUMBER.format(discounts / gross * 100)}% do faturamento bruto` : "Sem faturamento bruto"} tone="yellow" /><SalesKpi label="Média por dia" value={MONEY.format(averageDailyRevenue)} note={`${rangeDays(props.range)} dia(s) selecionado(s)`} /><SalesKpi label="Dias com venda" value={NUMBER.format(sellingDays.length)} note={`de ${rangeDays(props.range)} dia(s) no período`} /></div>
 
-    <div className="sales-evolution-grid"><article className="chart-card sales-trend-card"><div className="card-title-row"><div><p>Evolução</p><h3>Faturamento ao longo dos dias</h3></div><span>{dateLabel(props.range.start)} a {dateLabel(props.range.end)}</span></div><SalesTrendChart rows={dailyRevenue} /></article><div className="sales-day-insights"><SalesDayInsight label="Melhor dia" row={bestDay} tone="best" /><SalesDayInsight label="Pior dia com venda" row={worstDay} tone="worst" /></div></div>
+    <div className="sales-evolution-grid"><article className="chart-card sales-trend-card"><div className="sales-trend-heading"><div className="card-title-row"><div><p>Evolução</p><h3>Faturamento ao longo do tempo</h3></div><span>{dateLabel(props.range.start)} a {dateLabel(props.range.end)}</span></div><div className="sales-granularity" role="tablist" aria-label="Agrupar faturamento"><button type="button" role="tab" aria-selected={trendGranularity === "day"} className={trendGranularity === "day" ? "active" : ""} onClick={() => selectTrendGranularity("day")}>Dia</button><button type="button" role="tab" aria-selected={trendGranularity === "week"} className={trendGranularity === "week" ? "active" : ""} onClick={() => selectTrendGranularity("week")}>Semana</button><button type="button" role="tab" aria-selected={trendGranularity === "month"} className={trendGranularity === "month" ? "active" : ""} onClick={() => selectTrendGranularity("month")}>Mês</button></div></div><SalesTrendChart rows={trendRows} granularity={trendGranularity} /></article><div className="sales-day-insights"><SalesPeriodInsight label={`Melhor ${periodNoun}`} row={bestPeriod} tone="best" /><SalesPeriodInsight label={`Pior ${periodNoun} com venda`} row={worstPeriod} tone="worst" /></div></div>
 
     <section className="sales-analysis-section"><div className="sales-section-heading"><div><p>Operação</p><h3>Faturamento por área do bar</h3><span>Participação e volume vendido por setor responsável.</span></div><strong>{areas.length} área(s)</strong></div>{areas.length ? <div className="area-sales-grid">{areas.map((area) => <AreaSalesCard key={area.area} row={area} totalRevenue={revenue} />)}</div> : <EmptyMini text="A integração não retornou áreas para este período." />}</section>
 
@@ -2111,25 +2150,32 @@ function PaymentSummary({ payments, sales, salesRevenue }: { payments: PaymentMe
 function CoverageBar({ known, missing }: { known: number; missing: number }) { const total = known + missing; const percentage = total ? known / total * 100 : 0; return <div className="coverage-panel"><div className="coverage-track"><i style={{ width: `${percentage}%` }} /></div><div className="coverage-legend"><span><i className="known-dot" />Com custo <strong>{MONEY.format(known)}</strong></span><span><i className="missing-dot" />Sem custo <strong>{MONEY.format(missing)}</strong></span></div></div>; }
 function AbcSummary({ rows }: { rows: { classification: "A" | "B" | "C"; total_value: number }[] }) { if (!rows.length) return <EmptyMini text="Sem vendas suficientes para calcular a Curva ABC." />; const groups = (["A", "B", "C"] as const).map((classification) => ({ classification, count: rows.filter((row) => row.classification === classification).length, value: rows.filter((row) => row.classification === classification).reduce((sum, row) => sum + Number(row.total_value), 0) })); return <div className="abc-summary">{groups.map((group) => <div key={group.classification}><b className={`abc-class class-${group.classification.toLowerCase()}`}>{group.classification}</b><span>{group.count} item(ns)</span><strong>{MONEY.format(group.value)}</strong></div>)}</div>; }
 function SalesKpi({ label, value, note, tone = "default" }: { label: string; value: string; note: string; tone?: "default" | "green" | "purple" | "yellow" }) { return <article className={`sales-kpi ${tone}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>; }
-function SalesDayInsight({ label, row, tone }: { label: string; row: { date: string; revenue: number; transactions: number | null } | null; tone: "best" | "worst" }) { return <article className={`sales-day-insight ${tone}`}><span>{label}</span><strong>{row ? MONEY.format(row.revenue) : "—"}</strong><div><b>{row ? dateLabel(row.date) : "Sem venda no período"}</b>{row?.transactions !== null && row?.transactions !== undefined ? <small>{NUMBER.format(row.transactions)} transações</small> : null}</div></article>; }
+function SalesPeriodInsight({ label, row, tone }: { label: string; row: SalesTrendRow | null; tone: "best" | "worst" }) { return <article className={`sales-day-insight ${tone}`}><span>{label}</span><strong>{row ? MONEY.format(row.revenue) : "—"}</strong><div><b>{row?.label ?? "Sem venda no período"}{row?.incomplete ? " · parcial" : ""}</b>{row?.transactions !== null && row?.transactions !== undefined ? <small>{NUMBER.format(row.transactions)} transações</small> : null}</div></article>; }
 function AreaSalesCard({ row, totalRevenue }: { row: { area: string; revenue: number; quantity: number }; totalRevenue: number }) { const share = totalRevenue > 0 ? row.revenue / totalRevenue * 100 : 0; return <article className="area-sales-card"><div><span>Área</span><h4>{row.area}</h4></div><strong>{MONEY.format(row.revenue)}</strong><div className="area-share-track"><i style={{ width: `${Math.min(100, Math.max(0, share))}%` }} /></div><footer><span>{NUMBER.format(share)}% do faturamento</span><b>{NUMBER.format(row.quantity)} itens</b></footer></article>; }
 function ProductRanking({ rows, metric }: { rows: { name: string; category: string; area: string; quantity: number; net: number }[]; metric: "quantity" | "revenue" }) { return rows.length ? <div className="ranking-list product-ranking">{rows.map((row, index) => <div key={`${row.name}-${row.area}`}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{row.name}</strong><small>{row.category} · {row.area}</small></div><b>{metric === "quantity" ? `${NUMBER.format(row.quantity)} un.` : MONEY.format(row.net)}</b></div>)}</div> : <EmptyMini text="Sem produtos no período." />; }
 
-function SalesTrendChart({ rows }: { rows: { date: string; revenue: number; transactions: number | null }[] }) {
+function SalesTrendChart({ rows, granularity }: { rows: SalesTrendRow[]; granularity: SalesGranularity }) {
   const width = 880; const height = 250; const left = 68; const right = 18; const top = 18; const bottom = 38;
   const plotWidth = width - left - right; const plotHeight = height - top - bottom; const max = Math.max(...rows.map((row) => row.revenue), 1);
   const x = (index: number) => left + (rows.length <= 1 ? plotWidth / 2 : index / (rows.length - 1) * plotWidth);
   const y = (value: number) => top + (max - value) / max * plotHeight;
   const linePoints = rows.map((row, index) => `${x(index)},${y(row.revenue)}`).join(" ");
   const areaPoints = `${left},${top + plotHeight} ${linePoints} ${width - right},${top + plotHeight}`;
+  const movingAverages = rows.map((row, index) => { const values = rows.slice(0, index + 1).filter((item) => !item.incomplete).slice(-3); return row.incomplete || !values.length ? null : values.reduce((sum, item) => sum + item.revenue, 0) / values.length; });
+  const movingAveragePoints = movingAverages.map((value, index) => value === null ? null : `${x(index)},${y(value)}`).filter((value): value is string => value !== null).join(" ");
   const grid = Array.from({ length: 4 }, (_, index) => max - max * index / 3);
   const labelIndexes = [...new Set(Array.from({ length: Math.min(5, rows.length) }, (_, index) => Math.round(index * (rows.length - 1) / Math.max(1, Math.min(5, rows.length) - 1))))];
   const compact = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL", notation: "compact", maximumFractionDigits: 1 });
-  return <div className="sales-trend-chart"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby="sales-trend-title sales-trend-description"><title id="sales-trend-title">Evolução diária do faturamento</title><desc id="sales-trend-description">Faturamento líquido para cada dia do período selecionado.</desc><defs><linearGradient id="sales-area-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#35d39a" stopOpacity=".22" /><stop offset="100%" stopColor="#35d39a" stopOpacity="0" /></linearGradient></defs>
+  const latest = rows.at(-1) ?? null; const previous = rows.at(-2) ?? null;
+  const latestChange = latest && !latest.incomplete && previous && previous.revenue > 0 ? (latest.revenue - previous.revenue) / previous.revenue : null;
+  const latestAverage = [...movingAverages].reverse().find((value) => value !== null) ?? null;
+  const groupLabel = granularity === "month" ? "mensal" : granularity === "week" ? "semanal" : "diária";
+  const barWidth = Math.max(8, Math.min(54, plotWidth / Math.max(rows.length, 1) * .58));
+  return <div className={`sales-trend-chart ${granularity === "month" ? "monthly" : ""}`}><div className="sales-trend-legend"><span><i />Faturamento</span>{granularity === "month" && <span className="average"><i />Média móvel de 3 meses</span>}</div><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-labelledby="sales-trend-title sales-trend-description"><title id="sales-trend-title">Evolução {groupLabel} do faturamento</title><desc id="sales-trend-description">Faturamento líquido agrupado por {granularity === "month" ? "mês" : granularity === "week" ? "semana" : "dia"} no período selecionado.</desc><defs><linearGradient id="sales-area-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#35d39a" stopOpacity=".22" /><stop offset="100%" stopColor="#35d39a" stopOpacity="0" /></linearGradient></defs>
     {grid.map((value) => <g key={value}><line x1={left} x2={width - right} y1={y(value)} y2={y(value)} className="chart-grid-line" /><text x={left - 10} y={y(value) + 4} textAnchor="end" className="chart-axis-label">{compact.format(value)}</text></g>)}
-    {rows.length ? <><polygon points={areaPoints} fill="url(#sales-area-gradient)" /><polyline points={linePoints} className="sales-trend-line" />{rows.length <= 31 ? rows.map((row, index) => <circle key={row.date} cx={x(index)} cy={y(row.revenue)} r="4" className="sales-trend-point"><title>{`${dateLabel(row.date)} · ${MONEY.format(row.revenue)}${row.transactions === null ? "" : ` · ${NUMBER.format(row.transactions)} transações`}`}</title></circle>) : null}</> : null}
-    {labelIndexes.map((index) => <text key={rows[index]?.date ?? index} x={x(index)} y={height - 10} textAnchor="middle" className="chart-axis-label">{rows[index] ? dateLabel(rows[index].date).slice(0, 5) : ""}</text>)}
-  </svg></div>;
+    {rows.length ? granularity === "month" ? <>{rows.map((row, index) => <rect key={row.key} x={x(index) - barWidth / 2} y={y(row.revenue)} width={barWidth} height={Math.max(1, top + plotHeight - y(row.revenue))} rx="4" className={`sales-month-bar ${row.incomplete ? "incomplete" : ""}`}><title>{`${row.label}${row.incomplete ? " (parcial)" : ""} · ${MONEY.format(row.revenue)}${row.transactions === null ? "" : ` · ${NUMBER.format(row.transactions)} transações`}`}</title></rect>)}{movingAveragePoints && <polyline points={movingAveragePoints} className="sales-average-line" />}{rows.map((row, index) => movingAverages[index] === null ? null : <circle key={`average-${row.key}`} cx={x(index)} cy={y(movingAverages[index])} r="3" className="sales-average-point"><title>{`${row.label} · média móvel ${MONEY.format(movingAverages[index])}`}</title></circle>)}</> : <><polygon points={areaPoints} fill="url(#sales-area-gradient)" /><polyline points={linePoints} className="sales-trend-line" />{rows.length <= 31 ? rows.map((row, index) => <circle key={row.key} cx={x(index)} cy={y(row.revenue)} r="4" className="sales-trend-point"><title>{`${row.label} · ${MONEY.format(row.revenue)}${row.transactions === null ? "" : ` · ${NUMBER.format(row.transactions)} transações`}`}</title></circle>) : null}</> : null}
+    {labelIndexes.map((index) => <text key={rows[index]?.key ?? index} x={x(index)} y={height - 10} textAnchor="middle" className="chart-axis-label">{rows[index]?.shortLabel ?? ""}</text>)}
+  </svg>{granularity === "month" && latest ? <div className="sales-trend-reading"><div><span>Último mês exibido</span><strong>{latest.label}{latest.incomplete ? " (parcial)" : ""}</strong></div><div><span>Variação sobre o anterior</span><strong className={latestChange === null ? "" : latestChange >= 0 ? "positive" : "negative"}>{latest.incomplete ? "Disponível ao fechar o mês" : latestChange === null ? "Sem comparação" : `${latestChange >= 0 ? "+" : ""}${NUMBER.format(latestChange * 100)}%`}</strong></div><div><span>Média móvel completa</span><strong>{latestAverage === null ? "—" : MONEY.format(latestAverage)}</strong></div></div> : null}</div>;
 }
 function ExpenseKpi({ label, value, note, tone }: { label: string; value: string; note: string; tone: "neutral" | "green" | "yellow" | "red" }) { return <article className={`expense-kpi ${tone}`}><span>{label}</span><strong>{value}</strong><small>{note}</small></article>; }
 function ExpenseCompositionRow({ label, value, total }: { label: string; value: number; total: number }) { const share = total > 0 ? value / total * 100 : 0; return <div><span><b>{label}</b><small>{NUMBER.format(share)}%</small></span><strong>{MONEY.format(value)}</strong><i><em style={{ width: `${Math.min(100, Math.max(0, share))}%` }} /></i></div>; }
