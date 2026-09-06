@@ -2334,18 +2334,19 @@ function useChartHover<T>(rows: T[], x: (index: number) => number, left: number,
     point.x = event.clientX; point.y = event.clientY;
     const local = point.matrixTransform(ctm.inverse());
     const ratio = rows.length > 1 ? (local.x - left) / plotWidth : 0;
-    setIndex(Math.min(rows.length - 1, Math.max(0, Math.round(ratio * (rows.length - 1)))));
+    const next = Math.min(rows.length - 1, Math.max(0, Math.round(ratio * (rows.length - 1))));
+    setIndex((current) => (current === next ? current : next));
   }
   function onLeave() { setIndex(null); }
   return { index, onMove, onLeave };
 }
 
 function ChartTooltip({ x, chartWidth, left, right, top, bottom, children }: { x: number; chartWidth: number; left: number; right: number; top: number; bottom: number; children: React.ReactNode }) {
-  const boxWidth = 168; const boxHeight = 92;
+  const boxWidth = 190; const boxHeight = 104;
   const posX = Math.min(Math.max(x - boxWidth / 2, left), chartWidth - right - boxWidth);
   return <>
     <line x1={x} x2={x} y1={top} y2={bottom} className="chart-hover-line" />
-    <foreignObject x={posX} y={top} width={boxWidth} height={boxHeight}><div className="chart-tooltip">{children}</div></foreignObject>
+    <foreignObject x={posX} y={top} width={boxWidth} height={boxHeight} pointerEvents="none"><div className="chart-tooltip">{children}</div></foreignObject>
   </>;
 }
 function EmptyMini({ text }: { text: string }) { return <div className="empty-mini"><FileSpreadsheet size={24} /><p>{text}</p></div>; }
