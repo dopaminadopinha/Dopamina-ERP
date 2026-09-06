@@ -382,11 +382,15 @@ function ModuleHero({ eyebrow, title, description, action, icon, onAction }: { e
 type FinancialDay = { date: string; revenue: number; expenses: number; result: number };
 type SalesGranularity = "day" | "week" | "month";
 type SalesTrendRow = { key: string; start: string; end: string; label: string; shortLabel: string; revenue: number; transactions: number | null; incomplete: boolean };
+type SalesTrendScope = "page" | "six_months" | "twelve_months" | "custom";
+type MonthlyRevenueRow = { month_start: string; period_start: string; period_end: string; net_cents: number; transaction_count: number | null };
+type PaymentRevenueRow = { operational_date: string; value_cents: number };
 
 function datesInRange(range: DateRange) { return Array.from({ length: rangeDays(range) }, (_, index) => shiftDate(range.start, index)); }
 function salesInRange(rows: Sale[], range: DateRange) { return rows.filter((row) => row.business_date >= range.start && row.business_date <= range.end); }
 function reportRevenue(rows: Sale[]) { return rows.reduce((sum, row) => sum + Number(row.revenue_amount ?? row.closing_net_amount ?? row.gross_amount), 0); }
 function defaultSalesGranularity(range: DateRange): SalesGranularity { const days = rangeDays(range); return days > 120 ? "month" : days > 31 ? "week" : "day"; }
+function trailingMonthRange(months: number): DateRange { const today = isoInSaoPaulo(); const [year, month] = today.split("-").map(Number); const start = new Date(Date.UTC(year, month - months, 1)).toISOString().slice(0, 10); return { start, end: today }; }
 function monthName(value: string, short = false) { return new Intl.DateTimeFormat("pt-BR", { month: short ? "short" : "long", year: "numeric", timeZone: "UTC" }).format(new Date(`${value}T12:00:00Z`)).replace(" de ", " ").replace(".", ""); }
 function salesPeriodKey(date: string, granularity: SalesGranularity) {
   if (granularity === "day") return date;
@@ -415,6 +419,18 @@ function aggregateSalesTrend(rows: { date: string; revenue: number; transactions
     return { ...row, label: monthName(row.start), shortLabel: monthName(row.start, true), incomplete: row.start !== calendarStart || row.end !== calendarEnd || row.end > today };
   });
 }
+function monthlyRevenueFromPayments(rows: PaymentRevenueRow[], range: DateRange): MonthlyRevenueRow[] {
+  const totals = new Map<string, number>();
+  rows.forEach((row) => { const key = row.operational_date.slice(0, 7); totals.set(key, (totals.get(key) ?? 0) + Number(row.value_cents)); });
+  const [startYear, startMonth] = range.start.split("-").map(Number); const [endYear, endMonth] = range.end.split("-").map(Number);
+  const result: MonthlyRevenueRow[] = [];
+  for (let cursor = new Date(Date.UTC(startYear, startMonth - 1, 1)); cursor <= new Date(Date.UTC(endYear, endMonth - 1, 1)); cursor = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 1))) {
+    const monthStart = cursor.toISOString().slice(0, 10); const key = monthStart.slice(0, 7); const calendarEnd = new Date(Date.UTC(cursor.getUTCFullYear(), cursor.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+    result.push({ month_start: monthStart, period_start: monthStart < range.start ? range.start : monthStart, period_end: calendarEnd > range.end ? range.end : calendarEnd, net_cents: totals.get(key) ?? 0, transaction_count: null });
+  }
+  return result;
+}
+function monthlyRevenueTrend(rows: MonthlyRevenueRow[]): SalesTrendRow[] { const today = isoInSaoPaulo(); return rows.map((row) => { const [year, month] = row.month_start.split("-").map(Number); const calendarEnd = new Date(Date.UTC(year, month, 0)).toISOString().slice(0, 10); return { key: row.month_start.slice(0, 7), start: row.period_start, end: row.period_end, label: monthName(row.month_start), shortLabel: monthName(row.month_start, true), revenue: Number(row.net_cents) / 100, transactions: row.transaction_count === null ? null : Number(row.transaction_count), incomplete: row.period_start !== row.month_start || row.period_end !== calendarEnd || row.period_end > today }; }); }
 
 function Overview({ sales, expenses, data, setSection, range }: Parameters<typeof SectionContent>[0]) {
   const [dayOverride, setDayOverride] = useState("");
@@ -919,10 +935,49 @@ function AttentionPanel({ data, range }: { data: DataState; range: DateRange }) 
 function SalesPage(props: Parameters<typeof SectionContent>[0]) {
   const [query, setQuery] = useState("");
   const [productSort, setProductSort] = useState<"revenue" | "quantity" | "lowest">("revenue");
+  const initialHistoryRange = useMemo(() => trailingMonthRange(6), []);
+  const [trendScope, setTrendScope] = useState<SalesTrendScope>("page");
+  const [historyStart, setHistoryStart] = useState(initialHistoryRange.start);
+  const [historyEnd, setHistoryEnd] = useState(initialHistoryRange.end);
+  const [monthlyHistory, setMonthlyHistory] = useState<MonthlyRevenueRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
   const [trendPreference, setTrendPreference] = useState<{ rangeKey: string; value: SalesGranularity } | null>(null);
   const trendRangeKey = `${props.range.start}|${props.range.end}`;
   const trendGranularity = trendPreference?.rangeKey === trendRangeKey ? trendPreference.value : defaultSalesGranularity(props.range);
   const selectTrendGranularity = (value: SalesGranularity) => setTrendPreference({ rangeKey: trendRangeKey, value });
+  const historyRange = useMemo(() => trendScope === "twelve_months" ? trailingMonthRange(12) : trendScope === "six_months" ? trailingMonthRange(6) : { start: historyStart, end: historyEnd }, [trendScope, historyStart, historyEnd]);
+  const historyRangeStart = historyRange.start; const historyRangeEnd = historyRange.end;
+  useEffect(() => {
+    if (trendScope === "page" || !historyRangeStart || !historyRangeEnd || historyRangeStart > historyRangeEnd) return;
+    let cancelled = false;
+    async function loadMonthlyHistory() {
+      setHistoryLoading(true); setHistoryError("");
+      try {
+        const requestedRange = { start: historyRangeStart, end: historyRangeEnd };
+        const { data, error } = await supabase.rpc("get_monthly_revenue_history", { p_business_id: Number(props.businessId), p_period_start: requestedRange.start, p_period_end: requestedRange.end });
+        let result = (data ?? []) as MonthlyRevenueRow[];
+        if (error) {
+          const paymentRows: PaymentRevenueRow[] = []; let page = 0;
+          while (true) {
+            const { data: paymentPage, error: paymentError } = await supabase.from("zig_payment_totals").select("operational_date,value_cents").eq("business_id", Number(props.businessId)).gte("operational_date", requestedRange.start).lte("operational_date", requestedRange.end).order("operational_date").range(page * 1000, page * 1000 + 999);
+            if (paymentError) throw paymentError;
+            paymentRows.push(...((paymentPage ?? []) as PaymentRevenueRow[]));
+            if (!paymentPage || paymentPage.length < 1000) break;
+            page += 1;
+          }
+          result = monthlyRevenueFromPayments(paymentRows, requestedRange);
+        }
+        if (!cancelled) setMonthlyHistory(result);
+      } catch {
+        if (!cancelled) { setMonthlyHistory([]); setHistoryError("Não foi possível carregar o histórico mensal."); }
+      } finally {
+        if (!cancelled) setHistoryLoading(false);
+      }
+    }
+    void loadMonthlyHistory();
+    return () => { cancelled = true; };
+  }, [trendScope, historyRangeStart, historyRangeEnd, props.businessId]);
   const apiHasData = props.data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
   const gross = apiHasData ? Number(props.data.zig.summary.gross_cents) / 100 : props.sales.reduce((sum, sale) => sum + Number(sale.gross_amount), 0);
   const discounts = apiHasData ? Number(props.data.zig.summary.discount_cents) / 100 : props.sales.reduce((sum, sale) => sum + Number(sale.discount_amount), 0);
@@ -947,13 +1002,17 @@ function SalesPage(props: Parameters<typeof SectionContent>[0]) {
     else props.sales.forEach((sale) => { const current = values.get(sale.business_date) ?? { revenue: 0, transactions: null }; current.revenue += Number(sale.revenue_amount ?? sale.closing_net_amount ?? sale.gross_amount); values.set(sale.business_date, current); });
     return datesInRange(props.range).map((date) => ({ date, revenue: values.get(date)?.revenue ?? 0, transactions: values.get(date)?.transactions ?? null }));
   }, [apiHasData, props.data.zig.daily, props.range, props.sales]);
-  const trendRows = useMemo(() => aggregateSalesTrend(dailyRevenue, trendGranularity), [dailyRevenue, trendGranularity]);
+  const pageTrendRows = useMemo(() => aggregateSalesTrend(dailyRevenue, trendGranularity), [dailyRevenue, trendGranularity]);
+  const historyTrendRows = useMemo(() => monthlyRevenueTrend(monthlyHistory), [monthlyHistory]);
+  const displayedTrendRows = trendScope === "page" ? pageTrendRows : historyTrendRows;
+  const displayedGranularity = trendScope === "page" ? trendGranularity : "month";
+  const displayedRange = trendScope === "page" ? props.range : historyRange;
   const sellingDays = dailyRevenue.filter((row) => row.revenue > 0);
-  const sellingPeriods = trendRows.filter((row) => row.revenue > 0);
-  const comparablePeriods = trendGranularity === "month" && sellingPeriods.some((row) => !row.incomplete) ? sellingPeriods.filter((row) => !row.incomplete) : sellingPeriods;
+  const sellingPeriods = displayedTrendRows.filter((row) => row.revenue > 0);
+  const comparablePeriods = displayedGranularity === "month" && sellingPeriods.some((row) => !row.incomplete) ? sellingPeriods.filter((row) => !row.incomplete) : sellingPeriods;
   const bestPeriod = comparablePeriods.reduce<SalesTrendRow | null>((best, row) => !best || row.revenue > best.revenue ? row : best, null);
   const worstPeriod = comparablePeriods.reduce<SalesTrendRow | null>((worst, row) => !worst || row.revenue < worst.revenue ? row : worst, null);
-  const periodNoun = trendGranularity === "month" ? "mês" : trendGranularity === "week" ? "semana" : "dia";
+  const periodNoun = displayedGranularity === "month" ? "mês" : displayedGranularity === "week" ? "semana" : "dia";
   const areas = useMemo(() => {
     const values = new Map<string, { area: string; revenue: number; quantity: number }>();
     grouped.forEach((row) => { const current = values.get(row.area) ?? { area: row.area, revenue: 0, quantity: 0 }; current.revenue += row.net; current.quantity += row.quantity; values.set(row.area, current); });
@@ -968,7 +1027,7 @@ function SalesPage(props: Parameters<typeof SectionContent>[0]) {
     {!apiHasData && props.sales.length > 0 && <div className="sales-data-note"><TriangleAlert size={15} /><span>O relatório importado não informa a quantidade de transações. Ticket médio e vendas aparecem como indisponíveis até a sincronização da Zig.</span></div>}
     <div className="sales-kpi-grid"><SalesKpi label="Faturamento líquido" value={MONEY.format(revenue)} note="Vendas após descontos" tone="green" /><SalesKpi label="Faturamento bruto" value={MONEY.format(gross)} note="Antes dos descontos" /><SalesKpi label="Itens vendidos" value={NUMBER.format(quantity)} note={`${grouped.length} produto(s) no período`} /><SalesKpi label="Vendas / transações" value={transactionCount === null ? "—" : NUMBER.format(transactionCount)} note={apiHasData ? "Transações válidas da Zig" : "Dado indisponível"} /><SalesKpi label="Ticket médio" value={averageTicket === null ? "—" : MONEY.format(averageTicket)} note="Faturamento líquido por venda" tone="purple" /><SalesKpi label="Total de descontos" value={MONEY.format(discounts)} note={gross > 0 ? `${NUMBER.format(discounts / gross * 100)}% do faturamento bruto` : "Sem faturamento bruto"} tone="yellow" /><SalesKpi label="Média por dia" value={MONEY.format(averageDailyRevenue)} note={`${rangeDays(props.range)} dia(s) selecionado(s)`} /><SalesKpi label="Dias com venda" value={NUMBER.format(sellingDays.length)} note={`de ${rangeDays(props.range)} dia(s) no período`} /></div>
 
-    <div className="sales-evolution-grid"><article className="chart-card sales-trend-card"><div className="sales-trend-heading"><div className="card-title-row"><div><p>Evolução</p><h3>Faturamento ao longo do tempo</h3></div><span>{dateLabel(props.range.start)} a {dateLabel(props.range.end)}</span></div><div className="sales-granularity" role="tablist" aria-label="Agrupar faturamento"><button type="button" role="tab" aria-selected={trendGranularity === "day"} className={trendGranularity === "day" ? "active" : ""} onClick={() => selectTrendGranularity("day")}>Dia</button><button type="button" role="tab" aria-selected={trendGranularity === "week"} className={trendGranularity === "week" ? "active" : ""} onClick={() => selectTrendGranularity("week")}>Semana</button><button type="button" role="tab" aria-selected={trendGranularity === "month"} className={trendGranularity === "month" ? "active" : ""} onClick={() => selectTrendGranularity("month")}>Mês</button></div></div><SalesTrendChart rows={trendRows} granularity={trendGranularity} /></article><div className="sales-day-insights"><SalesPeriodInsight label={`Melhor ${periodNoun}`} row={bestPeriod} tone="best" /><SalesPeriodInsight label={`Pior ${periodNoun} com venda`} row={worstPeriod} tone="worst" /></div></div>
+    <div className="sales-evolution-grid"><article className="chart-card sales-trend-card"><div className="sales-trend-heading"><div className="card-title-row"><div><p>Evolução</p><h3>Faturamento ao longo do tempo</h3></div><span>{dateLabel(displayedRange.start)} a {dateLabel(displayedRange.end)}</span></div><div className="sales-history-controls"><select value={trendScope} onChange={(event) => setTrendScope(event.target.value as SalesTrendScope)} aria-label="Período do gráfico"><option value="page">Período da página</option><option value="six_months">Últimos 6 meses</option><option value="twelve_months">Últimos 12 meses</option><option value="custom">Personalizado</option></select>{trendScope === "page" && <div className="sales-granularity" role="tablist" aria-label="Agrupar faturamento"><button type="button" role="tab" aria-selected={trendGranularity === "day"} className={trendGranularity === "day" ? "active" : ""} onClick={() => selectTrendGranularity("day")}>Dia</button><button type="button" role="tab" aria-selected={trendGranularity === "week"} className={trendGranularity === "week" ? "active" : ""} onClick={() => selectTrendGranularity("week")}>Semana</button><button type="button" role="tab" aria-selected={trendGranularity === "month"} className={trendGranularity === "month" ? "active" : ""} onClick={() => selectTrendGranularity("month")}>Mês</button></div>}</div></div>{trendScope === "custom" && <div className="sales-history-dates"><label><span>De</span><input type="date" value={historyStart} max={historyEnd} onChange={(event) => setHistoryStart(event.target.value)} /></label><label><span>Até</span><input type="date" value={historyEnd} min={historyStart} max={isoInSaoPaulo()} onChange={(event) => setHistoryEnd(event.target.value)} /></label></div>}{historyLoading ? <div className="sales-history-state"><RefreshCw size={15} className="spinning" />Carregando apenas o faturamento mensal...</div> : historyError ? <div className="sales-history-state error"><TriangleAlert size={15} />{historyError}</div> : <SalesTrendChart rows={displayedTrendRows} granularity={displayedGranularity} />}</article><div className="sales-day-insights"><SalesPeriodInsight label={`Melhor ${periodNoun}`} row={bestPeriod} tone="best" /><SalesPeriodInsight label={`Pior ${periodNoun} com venda`} row={worstPeriod} tone="worst" /></div></div>
 
     <section className="sales-analysis-section"><div className="sales-section-heading"><div><p>Operação</p><h3>Faturamento por área do bar</h3><span>Participação e volume vendido por setor responsável.</span></div><strong>{areas.length} área(s)</strong></div>{areas.length ? <div className="area-sales-grid">{areas.map((area) => <AreaSalesCard key={area.area} row={area} totalRevenue={revenue} />)}</div> : <EmptyMini text="A integração não retornou áreas para este período." />}</section>
 
