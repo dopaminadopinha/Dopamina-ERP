@@ -7,7 +7,7 @@ import {
   ArrowDownRight, ArrowUpRight, BarChart3, Boxes, CalendarRange,
   CheckCircle2, ChefHat, ChevronLeft, ChevronRight, CircleDollarSign, ClipboardList, Clock3, FileBarChart2, FileSpreadsheet,
   GripVertical, LayoutDashboard, LogOut, Menu, MoreHorizontal, PackageSearch, Pencil,
-  Plus, ReceiptText, RefreshCw, Search, Settings, ShoppingBasket, ShoppingCart, Sparkles, Trash2, TrendingUp, TriangleAlert,
+  Plus, ReceiptText, RefreshCw, Search, Settings, ShoppingBasket, ShoppingCart, Trash2, TrendingUp, TriangleAlert,
   UsersRound, WalletCards, X,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -19,7 +19,7 @@ import { StructuralCostsSection } from "@/components/structural-costs-section";
 import { DismissibleNotice } from "@/components/dismissible-notice";
 import { parseZigReports, type ZigImportPayload } from "@/lib/zig-import";
 
-type Section = "visao-geral" | "dre" | "insights" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" |
+type Section = "visao-geral" | "dre" | "vendas" | "cmv" | "despesas" | "setores" | "produtos" | "estoque" | "compras" | "pessoal" |
   "planejamento" | "cadastros" | "importacoes" | "configuracoes";
 type Membership = { business_id: string; role: "owner" | "manager"; status: "active" | "pending" | "suspended"; businesses: { name: string } | { name: string }[] | null };
 type Profile = { full_name: string; email: string };
@@ -76,7 +76,6 @@ const NUMBER = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 2 });
 const DATE = new Intl.DateTimeFormat("pt-BR", { timeZone: "UTC" });
 const NAV_ITEMS: { id: Section; label: string; icon: React.ReactNode }[] = [
   { id: "visao-geral", label: "Visão geral", icon: <LayoutDashboard size={19} /> },
-  { id: "insights", label: "Insights", icon: <Sparkles size={19} /> },
   { id: "dre", label: "DRE", icon: <FileBarChart2 size={19} /> },
   { id: "vendas", label: "Vendas", icon: <TrendingUp size={19} /> },
   { id: "cmv", label: "CMV", icon: <BarChart3 size={19} /> },
@@ -363,7 +362,6 @@ export function DashboardShell() {
 function SectionContent(props: { section: Section; setSection: (section: Section) => void; businessId: string; userId: string; data: DataState; sales: Sale[]; saleItems: SaleItem[]; expenses: Expense[]; profitabilityImports: ProfitabilityImport[]; profitabilityItems: ProfitabilityItem[]; range: DateRange; refreshing: boolean; onRefresh: () => Promise<void> }) {
   if (props.section === "visao-geral") return <Overview {...props} />;
   if (props.section === "dre") return <DrePage {...props} />;
-  if (props.section === "insights") return <InsightsPage {...props} />;
   if (props.section === "vendas") return <SalesPage {...props} />;
   if (props.section === "cmv") return <CmvPage {...props} />;
   if (props.section === "despesas") return <ExpensesPage {...props} />;
@@ -715,7 +713,6 @@ function DreCompareRow({ label, current, previous, money }: { label: string; cur
 type InsightPriority = "critical" | "attention" | "opportunity" | "info";
 type Insight = { id: string; priority: InsightPriority; category: string; title: string; detail: string; impact?: string };
 const PRIORITY_ORDER: Record<InsightPriority, number> = { critical: 0, attention: 1, opportunity: 2, info: 3 };
-const PRIORITY_LABEL: Record<InsightPriority, string> = { critical: "Crítico", attention: "Atenção", opportunity: "Oportunidade", info: "Informação" };
 function pct(value: number) { return `${NUMBER.format(value * 100)}%`; }
 function sortInsights(rows: Insight[]) { return [...rows].sort((a, b) => PRIORITY_ORDER[a.priority] - PRIORITY_ORDER[b.priority]); }
 
@@ -790,132 +787,6 @@ function buildProductInsights(products: SectorProduct[], previousProducts: Secto
   known.filter((row) => Number(row.margin) >= 0.5 && row.share < 0.03 && row.revenue > 0).sort((a, b) => Number(b.margin) - Number(a.margin)).slice(0, 3).forEach((row) => insights.push({ id: `product-opportunity-${row.name}`, priority: "opportunity", category: "Produto", title: `${row.name} pode ter espaço para vender mais`, detail: `Margem de ${pct(Number(row.margin))}, mas representa só ${pct(row.share)} das vendas do período. Pode ser uma oportunidade para analisar destaque no cardápio ou no salão.` }));
   rows.filter((row) => row.costStatus === "missing" && row.revenue >= 200).sort((a, b) => b.revenue - a.revenue).slice(0, 3).forEach((row) => insights.push({ id: `product-missing-cost-${row.name}`, priority: "info", category: "Qualidade de dados", title: `${row.name} não tem custo confiável cadastrado`, detail: `Faturou ${MONEY.format(row.revenue)} no período, mas sem ficha técnica ou custo válido a margem não pode ser calculada.` }));
   return insights;
-}
-
-function buildStockInsights(stock: StockDashboard): Insight[] {
-  const insights: Insight[] = [];
-  const outOfStock = stock.items.filter((item) => item.status === "out" && item.has_baseline);
-  if (outOfStock.length) insights.push({ id: "stock-out", priority: "critical", category: "Estoque", title: `${outOfStock.length} item(ns) sem estoque`, detail: `${outOfStock.slice(0, 4).map((item) => item.name).join(", ")}${outOfStock.length > 4 ? ` e mais ${outOfStock.length - 4}` : ""} com saldo teórico zerado ou negativo.` });
-  const belowMinimum = stock.items.filter((item) => item.status === "low" || item.status === "below_minimum");
-  if (belowMinimum.length) insights.push({ id: "stock-low", priority: "attention", category: "Estoque", title: `${belowMinimum.length} item(ns) abaixo do mínimo`, detail: `${belowMinimum.slice(0, 4).map((item) => item.name).join(", ")}${belowMinimum.length > 4 ? ` e mais ${belowMinimum.length - 4}` : ""} estão abaixo do estoque mínimo cadastrado.` });
-  const divergent = stock.items.filter((item) => item.last_variance_quantity !== null && item.variance_value !== null && Math.abs(Number(item.variance_value)) >= 40);
-  divergent.sort((a, b) => Math.abs(Number(b.variance_value)) - Math.abs(Number(a.variance_value))).slice(0, 3).forEach((item) => insights.push({ id: `stock-divergence-${item.id}`, priority: Math.abs(Number(item.variance_value)) > 150 ? "attention" : "info", category: "Divergência", title: `${item.name} apresentou divergência de estoque`, detail: `Diferença de ${NUMBER.format(Math.abs(Number(item.last_variance_quantity)))} ${item.unit} no último inventário, equivalente a ${MONEY.format(Math.abs(Number(item.variance_value)))}. Não indica automaticamente furto ou erro — vale investigar a origem.`, impact: MONEY.format(Number(item.variance_value)) }));
-  const totalVariance = stock.items.reduce((sum, item) => sum + Math.abs(Number(item.variance_value ?? 0)), 0);
-  if (totalVariance >= 60) insights.push({ id: "stock-variance-total", priority: totalVariance > 500 ? "attention" : "info", category: "Divergência", title: "Divergências de estoque no período", detail: `A soma das diferenças entre estoque teórico e físico no período é de aproximadamente ${MONEY.format(totalVariance)}.`, impact: MONEY.format(totalVariance) });
-  const risk = stock.items.filter((item) => item.suggested_purchase !== null && Number(item.suggested_purchase) > 0 && item.reference_days !== null && Number(item.reference_days) >= 2 && item.has_baseline);
-  risk.sort((a, b) => Number(b.suggested_purchase) - Number(a.suggested_purchase)).slice(0, 3).forEach((item) => insights.push({ id: `stock-risk-${item.id}`, priority: "attention", category: "Reposição", title: `Estoque de ${item.name} pode ser insuficiente`, detail: `Estoque atual de ${NUMBER.format(Number(item.theoretical_quantity))} ${item.unit}. A referência de ${item.reference_days} período(s) comparável(is) recente(s) sugere consumo de ${NUMBER.format(Number(item.expected_quantity))} ${item.unit} — estimativa aproximada baseada no histórico, não uma garantia.` }));
-  const parados = stock.items.filter((item) => item.has_baseline && item.stock_value !== null && Number(item.stock_value) >= 150 && Number(item.theoretical_quantity) > 0 && item.consumed_period <= Number(item.theoretical_quantity) * 0.15);
-  parados.sort((a, b) => Number(b.stock_value) - Number(a.stock_value)).slice(0, 3).forEach((item) => insights.push({ id: `stock-slow-${item.id}`, priority: "opportunity", category: "Estoque parado", title: `${item.name} com giro baixo`, detail: `${MONEY.format(Number(item.stock_value))} imobilizados neste item, com apenas ${NUMBER.format(item.consumed_period)} ${item.unit} consumidos no período analisado.`, impact: MONEY.format(Number(item.stock_value)) }));
-  return insights;
-}
-
-type PriceHistoryPoint = { item_id: string; item_name: string; supplier_id: string; supplier_name: string | null; unit_cost: number; received_at: string };
-function buildPurchaseInsights(priceHistory: PriceHistoryPoint[]): Insight[] {
-  const insights: Insight[] = [];
-  const byItem = new Map<string, PriceHistoryPoint[]>();
-  priceHistory.forEach((point) => byItem.set(point.item_id, [...(byItem.get(point.item_id) ?? []), point]));
-  byItem.forEach((points) => {
-    if (points.length < 2) return;
-    const sorted = [...points].sort((a, b) => a.received_at.localeCompare(b.received_at));
-    const latest = sorted[sorted.length - 1]; const before = sorted[sorted.length - 2];
-    const change = before.unit_cost > 0 ? (latest.unit_cost - before.unit_cost) / before.unit_cost : null;
-    if (change !== null && change > 0.08) insights.push({ id: `purchase-price-${latest.item_id}`, priority: change > 0.15 ? "attention" : "info", category: "Compras", title: `${latest.item_name} ficou mais caro`, detail: `O último preço pago foi ${MONEY.format(latest.unit_cost)}, ${pct(change)} acima da compra anterior (${MONEY.format(before.unit_cost)}) registrada em ${dateLabel(before.received_at)}.` });
-  });
-  const byItemName = new Map<string, PriceHistoryPoint[]>();
-  priceHistory.forEach((point) => byItemName.set(point.item_name, [...(byItemName.get(point.item_name) ?? []), point]));
-  byItemName.forEach((points, name) => {
-    const bySupplier = new Map<string, PriceHistoryPoint>();
-    [...points].sort((a, b) => a.received_at.localeCompare(b.received_at)).forEach((point) => bySupplier.set(point.supplier_id, point));
-    const list = [...bySupplier.values()];
-    if (list.length < 2) return;
-    const sortedByPrice = [...list].sort((a, b) => a.unit_cost - b.unit_cost);
-    const cheapest = sortedByPrice[0]; const priciest = sortedByPrice[sortedByPrice.length - 1];
-    const diff = cheapest.unit_cost > 0 ? (priciest.unit_cost - cheapest.unit_cost) / cheapest.unit_cost : null;
-    if (diff !== null && diff > 0.1) insights.push({ id: `supplier-diff-${name}`, priority: "opportunity", category: "Fornecedores", title: `${name} tem preços diferentes entre fornecedores`, detail: `O último preço de ${priciest.supplier_name ?? "um fornecedor"} foi ${pct(diff)} maior que o de ${cheapest.supplier_name ?? "outro fornecedor"} (${MONEY.format(priciest.unit_cost)} vs. ${MONEY.format(cheapest.unit_cost)}).` });
-  });
-  return insights;
-}
-
-type PersonnelShiftRow = { hours_worked: number; amount_due: number };
-type PersonnelCostRow = { amount: number };
-function buildPersonnelInsights(currentShifts: PersonnelShiftRow[], currentCosts: PersonnelCostRow[], previousShifts: PersonnelShiftRow[], previousCosts: PersonnelCostRow[], netRevenue: number): Insight[] {
-  const insights: Insight[] = [];
-  const currentHours = currentShifts.reduce((sum, row) => sum + Number(row.hours_worked), 0);
-  const previousHours = previousShifts.reduce((sum, row) => sum + Number(row.hours_worked), 0);
-  const currentTotal = currentShifts.reduce((sum, row) => sum + Number(row.amount_due), 0) + currentCosts.reduce((sum, row) => sum + Number(row.amount), 0);
-  const previousTotal = previousShifts.reduce((sum, row) => sum + Number(row.amount_due), 0) + previousCosts.reduce((sum, row) => sum + Number(row.amount), 0);
-  const hoursChange = pctChange(currentHours, previousHours);
-  if (hoursChange !== null && hoursChange > 0.2 && currentHours > 0) insights.push({ id: "personnel-hours-up", priority: "info", category: "Pessoal", title: "Horas trabalhadas aumentaram no período", detail: `As horas registradas somam ${NUMBER.format(currentHours)} h, ${pct(hoursChange)} a mais que o período anterior equivalente (${NUMBER.format(previousHours)} h).` });
-  const costChange = pctChange(currentTotal, previousTotal);
-  if (costChange !== null && costChange > 0.2 && currentTotal > 0) insights.push({ id: "personnel-cost-up", priority: "attention", category: "Pessoal", title: "Custo de pessoal cresceu bastante no período", detail: `O custo de pessoal foi de ${MONEY.format(previousTotal)} para ${MONEY.format(currentTotal)} (${pct(costChange)}) em relação ao período anterior equivalente.`, impact: MONEY.format(currentTotal - previousTotal) });
-  const pessoalPct = netRevenue > 0 ? currentTotal / netRevenue : null;
-  if (pessoalPct !== null && pessoalPct > 0.3) insights.push({ id: "personnel-pct-revenue", priority: "attention", category: "Pessoal", title: "Custo de pessoal está pesado em relação ao faturamento", detail: `Pessoal representa ${pct(pessoalPct)} da receita líquida do período.` });
-  return insights;
-}
-
-function InsightsPage(props: Parameters<typeof SectionContent>[0]) {
-  const range = props.range;
-  const previousRange = previousEquivalentRange(range);
-  const apiHasData = props.data.zig.sync.some((row) => row.status === "completed" && !!row.last_success_at);
-  const current = useMemo(() => computeDreSummary(props.data.zig, props.data.catalogItems, props.data.expenses, props.data.feeRates, range, apiHasData, props.data.sales), [props.data.zig, props.data.catalogItems, props.data.expenses, props.data.feeRates, range, apiHasData, props.data.sales]);
-  const previous = useMemo(() => computeDreSummary(props.data.previousZig, props.data.catalogItems, props.data.expenses, props.data.feeRates, previousRange, apiHasData, props.data.sales), [props.data.previousZig, props.data.catalogItems, props.data.expenses, props.data.feeRates, previousRange, apiHasData, props.data.sales]);
-  const operationalAreas = useMemo(() => props.data.areas.filter((area) => area.is_operational), [props.data.areas]);
-  const sectorResults = useMemo(() => computeSectorResults(props.data.sectorProfitability.products, props.data.expenses, range, operationalAreas), [props.data.sectorProfitability, props.data.expenses, range, operationalAreas]);
-  const previousSectorResults = useMemo(() => computeSectorResults(props.data.previousSectorProfitability.products, props.data.expenses, previousRange, operationalAreas), [props.data.previousSectorProfitability, props.data.expenses, previousRange, operationalAreas]);
-
-  const [stock, setStock] = useState<StockDashboard>(EMPTY_STOCK);
-  const [priceHistory, setPriceHistory] = useState<PriceHistoryPoint[]>([]);
-  const [personnel, setPersonnel] = useState<{ shifts: PersonnelShiftRow[]; costs: PersonnelCostRow[] }>({ shifts: [], costs: [] });
-  const [previousPersonnel, setPreviousPersonnel] = useState<{ shifts: PersonnelShiftRow[]; costs: PersonnelCostRow[] }>({ shifts: [], costs: [] });
-  const [loadingExtra, setLoadingExtra] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoadingExtra(true);
-      const [stockResult, purchasesResult, personnelResult, previousPersonnelResult] = await Promise.all([
-        supabase.rpc("get_virtual_inventory_dashboard", { p_business_id: Number(props.businessId), p_period_start: range.start, p_period_end: range.end }),
-        supabase.rpc("get_purchases_dashboard", { p_business_id: Number(props.businessId), p_period_start: range.start, p_period_end: range.end }),
-        supabase.rpc("get_personnel_dashboard", { p_business_id: Number(props.businessId), p_period_start: range.start, p_period_end: range.end }),
-        supabase.rpc("get_personnel_dashboard", { p_business_id: Number(props.businessId), p_period_start: previousRange.start, p_period_end: previousRange.end }),
-      ]);
-      if (cancelled) return;
-      setStock((stockResult.data as StockDashboard | null) ?? EMPTY_STOCK);
-      setPriceHistory(((purchasesResult.data as { price_history?: PriceHistoryPoint[] } | null)?.price_history) ?? []);
-      const personnelData = personnelResult.data as { shifts?: PersonnelShiftRow[]; costs?: PersonnelCostRow[] } | null;
-      setPersonnel({ shifts: personnelData?.shifts ?? [], costs: personnelData?.costs ?? [] });
-      const previousPersonnelData = previousPersonnelResult.data as { shifts?: PersonnelShiftRow[]; costs?: PersonnelCostRow[] } | null;
-      setPreviousPersonnel({ shifts: previousPersonnelData?.shifts ?? [], costs: previousPersonnelData?.costs ?? [] });
-      setLoadingExtra(false);
-    }
-    void load();
-    return () => { cancelled = true; };
-  }, [props.businessId, range.start, range.end, previousRange.start, previousRange.end]);
-
-  const insights = useMemo(() => {
-    const rows = [
-      ...buildFinancialInsights(current, previous, sectorResults, previousSectorResults),
-      ...buildProductInsights(props.data.sectorProfitability.products, props.data.previousSectorProfitability.products),
-      ...buildStockInsights(stock),
-      ...buildPurchaseInsights(priceHistory),
-      ...buildPersonnelInsights(personnel.shifts, personnel.costs, previousPersonnel.shifts, previousPersonnel.costs, current.netRevenue),
-    ];
-    return sortInsights(rows);
-  }, [current, previous, sectorResults, previousSectorResults, props.data.sectorProfitability, props.data.previousSectorProfitability, stock, priceHistory, personnel, previousPersonnel]);
-
-  const grouped = (["critical", "attention", "opportunity", "info"] as const).map((priority) => ({ priority, rows: insights.filter((row) => row.priority === priority) })).filter((group) => group.rows.length > 0);
-  const periodLabel = `${dateLabel(range.start)} a ${dateLabel(range.end)}`;
-
-  return <section className="insights-page">
-    <ModuleHero eyebrow="Inteligência gerencial" title="O que revisar hoje" description="O ERP cruza vendas, CMV, pessoal, estoque, compras e despesas já cadastrados para apontar automaticamente o que merece atenção." icon={<Sparkles size={19} />} action="Atualizar" onAction={() => props.onRefresh()} />
-    <p className="dre-source-note"><CheckCircle2 size={15} />{periodLabel} · {insights.length} insight(s) encontrados{loadingExtra ? " · carregando estoque, compras e pessoal..." : ""}</p>
-    {insights.length ? <div className="insights-groups">
-      {grouped.map((group) => <div className={`insights-group priority-${group.priority}`} key={group.priority}>
-        <div className="insights-group-head"><span className={`insight-priority-dot ${group.priority}`} /><strong>{PRIORITY_LABEL[group.priority]}</strong><small>{group.rows.length}</small></div>
-        <div className="insights-list">{group.rows.map((row) => <article className="insight-card" key={row.id}><div className="insight-card-head"><span className="insight-category">{row.category}</span>{row.impact && <span className="insight-impact">{row.impact}</span>}</div><h3>{row.title}</h3><p>{row.detail}</p></article>)}</div>
-      </div>)}
-    </div> : <EmptyMini text="Nenhum ponto de atenção identificado com os dados atuais do período." />}
-  </section>;
 }
 
 function AttentionPanel({ data, range }: { data: DataState; range: DateRange }) {
